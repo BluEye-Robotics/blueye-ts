@@ -1,0 +1,21 @@
+{
+  "name": "@blueyerobotics/blueye-ts",
+  "version": "1.0.0",
+  "description": "",
+  "main": "dist/index.js",
+  "scripts": {
+    "start": "node dist/index.js",
+    "build": "tsc"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@blueyerobotics/protocol-definitions": "3.2.0-3e0ba702",
+    "buffer": "^6.0.3",
+    "zod": "^3.25.67"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  }
+}
