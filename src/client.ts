@@ -1,4 +1,4 @@
-import { blueye, google } from "@blueyerobotics/protocol-definitions";
+import { blueye } from "@blueyerobotics/protocol-definitions";
 import { Buffer } from "buffer";
 import { responseSchema, telemetrySchema } from "./schema";
 
@@ -26,10 +26,6 @@ type DecodedTelOutput<T extends Tel> = ReturnType<Protocol[T]["decode"]>;
 
 const isInProtocol = (key: string): key is keyof typeof blueye.protocol => {
   return key in blueye.protocol;
-};
-
-const isInGoogleProtocol = (key: string): key is keyof typeof google.protobuf => {
-  return key in google.protobuf;
 };
 
 export class BlueyeClient {
@@ -110,20 +106,17 @@ export class BlueyeClient {
     const response = await this.sendReqRep("GetTelemetryReq", { messageType: type });
     const { payload } = telemetrySchema.parse(response);
     const { typeUrl, value } = payload;
-    let result: DecodedTelOutput<T>;
 
     console.log(typeUrl);
 
     if (isInProtocol(typeUrl)) {
-      // @ts-expect-error
-      result = blueye.protocol[typeUrl].decode(value);
-    } else if (isInGoogleProtocol(typeUrl)) {
-      result = google.protobuf[typeUrl].decode(value) as DecodedTelOutput<T>;
+      const result = (blueye.protocol[typeUrl] as Protocol[T]).decode(value) as DecodedTelOutput<T>;
+
+      console.log("Result: ", result);
+
+      return result;
     } else {
       throw new Error("Unknown typeUrl");
     }
-
-    console.log("Result: ", result);
-    return result;
   }
 }
