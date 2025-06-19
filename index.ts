@@ -6,11 +6,12 @@ const WS_PUBSUB_URL = "ws://localhost:8765";
 const WS_REQREP_URL = "ws://localhost:8766";
 
 type Protocol = typeof blueye.protocol;
+
 type ReqKeys = Extract<keyof Protocol, `${string}Req`>;
 type Req = keyof Pick<Protocol, ReqKeys>;
 
-type MsgHandler<T extends Req> = Protocol[T];
-type CreateArgs<T extends Req> = Parameters<MsgHandler<T>["create"]>[0];
+type TelKeys = Extract<keyof Protocol, `${string}Tel`>;
+type Tel = keyof Pick<Protocol, TelKeys>;
 
 type ReqToRep<T extends Req> = T extends `${infer Prefix}Req`
   ? `${Prefix}Rep` extends keyof Protocol
@@ -18,7 +19,10 @@ type ReqToRep<T extends Req> = T extends `${infer Prefix}Req`
     : never
   : never;
 
-type DecodeOutput<T extends Req> = ReturnType<ReqToRep<T>["decode"]>;
+type MsgHandler<T extends Req> = Protocol[T];
+type CreateArgs<T extends Req> = Parameters<MsgHandler<T>["create"]>[0];
+type DecodedOutput<T extends Req> = ReturnType<ReqToRep<T>["decode"]>;
+type DecodedTelOutput<T extends Tel> = ReturnType<Protocol[T]["decode"]>;
 
 const responseSchema = z.object({
   key: z.string().transform(val => val.split(".").at(-1)!),
@@ -92,7 +96,7 @@ class BlueyeClient {
     });
   }
 
-  async sendReqRep<T extends Req>(req: T, opts: CreateArgs<T> = {}): Promise<DecodeOutput<T> | null> {
+  async sendReqRep<T extends Req>(req: T, opts: CreateArgs<T> = {}): Promise<DecodedOutput<T> | null> {
     const protocol = blueye.protocol[req];
     const message = protocol.create(opts);
     const encoded = protocol.encode(message as any).finish();
@@ -113,17 +117,18 @@ class BlueyeClient {
     }
 
     const rep = blueye.protocol[key as T] as ReqToRep<T>;
-    const decoded = rep.decode(data) as DecodeOutput<T>;
+    const result = rep.decode(data) as DecodedOutput<T>;
 
-    if (req !== "GetTelemetryReq") {
-      return decoded;
-    }
+    console.log("Decoded: ", result);
 
-    console.log("Decoded: ", decoded);
+    return result;
+  }
 
-    const { payload } = telemetrySchema.parse(decoded);
+  async reqTel<T extends Tel>(type: T): Promise<DecodedTelOutput<T>> {
+    const response = await this.sendReqRep("GetTelemetryReq", { messageType: type });
+    const { payload } = telemetrySchema.parse(response);
     const { typeUrl, value } = payload;
-    let result: DecodeOutput<T>;
+    let result: DecodedTelOutput<T>;
 
     console.log(typeUrl);
 
@@ -131,7 +136,7 @@ class BlueyeClient {
       // @ts-expect-error
       result = blueye.protocol[typeUrl].decode(value);
     } else if (isInGoogleProtocol(typeUrl)) {
-      result = google.protobuf[typeUrl].decode(value) as DecodeOutput<T>;
+      result = google.protobuf[typeUrl].decode(value) as DecodedTelOutput<T>;
     } else {
       throw new Error("Unknown typeUrl");
     }
