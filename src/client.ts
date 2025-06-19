@@ -1,5 +1,6 @@
 import { blueye } from "@blueyerobotics/protocol-definitions";
 import { Buffer } from "buffer";
+import { ConsolaInstance, createConsola, LogLevel, LogLevels } from "consola";
 import { responseSchema, telemetrySchema } from "./schema";
 
 const WS_PUBSUB_URL = "ws://localhost:8765";
@@ -32,18 +33,20 @@ export class BlueyeClient {
   private wsPubSub: WebSocket;
   private wsReqRep: WebSocket;
   private isReqRepConnected = false;
+  private logger: ConsolaInstance;
 
-  constructor() {
+  constructor(logLevel: LogLevel = LogLevels.info) {
+    this.logger = createConsola({ level: logLevel, formatOptions: { colors: true, compact: false } });
     this.wsPubSub = new WebSocket(WS_PUBSUB_URL);
     this.wsReqRep = new WebSocket(WS_REQREP_URL);
 
     this.wsPubSub.addEventListener("open", () => {
-      console.log("[WS] PubSub connected");
+      this.logger.info("[WS] PubSub connected");
     });
 
     this.wsReqRep.addEventListener("open", () => {
       this.isReqRepConnected = true;
-      console.log("[WS] ReqRep connected");
+      this.logger.info("[WS] ReqRep connected");
     });
 
     this.wsPubSub.addEventListener("message", event => {
@@ -51,13 +54,13 @@ export class BlueyeClient {
       const rep = blueye.protocol[key as Req];
       const decoded = rep.decode(data);
 
-      // console.log("[WS] PubSub message:", key, decoded);
+      this.logger.verbose("[WS] PubSub message:", key, decoded);
     });
   }
 
   private async send(data: string): Promise<string> {
     while (!this.isReqRepConnected) {
-      console.log("waiting");
+      this.logger.debug("Waiting...");
       await new Promise(res => setTimeout(res, 50));
     }
 
@@ -67,7 +70,7 @@ export class BlueyeClient {
       });
 
       this.wsReqRep.addEventListener("error", error => {
-        console.error("[WS] Error:", error);
+        this.logger.error("[WS] Error:", error);
         reject(error);
       });
 
@@ -87,7 +90,7 @@ export class BlueyeClient {
       })
     );
 
-    console.log("Response: ", response);
+    this.logger.debug("Response: ", response);
 
     const { key, data } = responseSchema.parse(JSON.parse(response));
 
@@ -98,7 +101,7 @@ export class BlueyeClient {
     const rep = blueye.protocol[key as T] as ReqToRep<T>;
     const result = rep.decode(data) as DecodedOutput<T>;
 
-    console.log("Decoded: ", result);
+    this.logger.debug("Decoded: ", result);
 
     return result;
   }
@@ -108,12 +111,12 @@ export class BlueyeClient {
     const { payload } = telemetrySchema.parse(response);
     const { typeUrl, value } = payload;
 
-    console.log(typeUrl);
+    this.logger.debug(typeUrl);
 
     if (isInProtocol(typeUrl)) {
       const result = (blueye.protocol[typeUrl] as Protocol[T]).decode(value) as DecodedTelOutput<T>;
 
-      console.log("Result: ", result);
+      this.logger.debug("Result: ", result);
 
       return result;
     } else {
