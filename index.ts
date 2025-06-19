@@ -107,6 +107,11 @@ class BlueyeClient {
     console.log("Response: ", response);
 
     const { key, data } = responseSchema.parse(JSON.parse(response));
+
+    if (key === "Empty") {
+      return null;
+    }
+
     const rep = blueye.protocol[key as T] as ReqToRep<T>;
     const decoded = rep.decode(data) as DecodeOutput<T>;
 
