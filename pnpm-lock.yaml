@@ -17,6 +17,9 @@ importers:
       consola:
         specifier: ^3.4.2
         version: 3.4.2
+      strict-event-emitter:
+        specifier: ^0.5.1
+        version: 0.5.1
       zod:
         specifier: ^3.25.67
         version: 3.25.67
@@ -46,6 +49,9 @@ packages:
   ieee754@1.2.1:
     resolution: {integrity: sha512-dcyqhDvX1C46lXZcVqCpK+FtMRQVdIMN6/Df5js2zouUsqG7I6sFxitIC+7KYK29KdXOLHdu9zL4sFnoVQnqaA==}
 
+  strict-event-emitter@0.5.1:
+    resolution: {integrity: sha512-vMgjE/GGEPEFnhFub6pa4FmJBRBVOLpIII2hvCZ8Kzb7K0hlHo7mQv6xYrBvCL2LtAIBwFUK8wvuJgTVSQ5MFQ==}
+
   typescript@5.8.3:
     resolution: {integrity: sha512-p1diW6TqL9L07nNxvRMM7hMMw4c5XOo/1ibL4aAIGmSAt9slTE1Xgw5KWuof2uTOvCg9BY7ZRi+GaF+7sfgPeQ==}
     engines: {node: '>=14.17'}
@@ -72,6 +78,8 @@ snapshots:
   consola@3.4.2: {}
 
   ieee754@1.2.1: {}
+
+  strict-event-emitter@0.5.1: {}
 
   typescript@5.8.3: {}
 

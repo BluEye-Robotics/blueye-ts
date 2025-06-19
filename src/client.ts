@@ -1,6 +1,7 @@
 import { blueye } from "@blueyerobotics/protocol-definitions";
 import { Buffer } from "buffer";
 import { ConsolaInstance, createConsola, LogLevel, LogLevels } from "consola";
+import { Emitter } from "strict-event-emitter";
 import { responseSchema, telemetrySchema } from "./schema";
 
 const WS_PUBSUB_URL = "ws://localhost:8765";
@@ -25,6 +26,10 @@ type CreateArgs<T extends Req> = Parameters<MsgHandler<T>["create"]>[0];
 type DecodedOutput<T extends Req> = ReturnType<ReqToRep<T>["decode"]>;
 type DecodedTelOutput<T extends Tel> = ReturnType<Protocol[T]["decode"]>;
 
+type Events = {
+  [K in Tel]: [DecodedTelOutput<K>];
+};
+
 const isInProtocol = (key: string): key is keyof typeof blueye.protocol => {
   return key in blueye.protocol;
 };
@@ -34,6 +39,8 @@ export class BlueyeClient {
   private wsReqRep: WebSocket;
   private isReqRepConnected = false;
   private logger: ConsolaInstance;
+
+  sub = new Emitter<Events>();
 
   constructor(logLevel: LogLevel = LogLevels.info) {
     this.logger = createConsola({ level: logLevel, formatOptions: { colors: true, compact: false } });
@@ -51,10 +58,11 @@ export class BlueyeClient {
 
     this.wsPubSub.addEventListener("message", event => {
       const { key, data } = responseSchema.parse(JSON.parse(event.data));
-      const rep = blueye.protocol[key as Tel];
-      const decoded = rep.decode(data);
+      const protocol = blueye.protocol[key as Tel];
+      const message = protocol.decode(data);
 
-      this.logger.verbose("[WS] PubSub message:", key, decoded);
+      this.logger.verbose("[WS] PubSub message:", key, message);
+      this.sub.emit(key as Tel, message as any);
     });
   }
 
@@ -100,7 +108,7 @@ export class BlueyeClient {
       })
     );
 
-    this.logger.debug("Response: ", response);
+    this.logger.debug("Response:", response);
 
     const { key, data } = responseSchema.parse(JSON.parse(response));
 
@@ -111,7 +119,7 @@ export class BlueyeClient {
     const rep = blueye.protocol[key as T] as ReqToRep<T>;
     const result = rep.decode(data) as DecodedOutput<T>;
 
-    this.logger.debug("Decoded: ", result);
+    this.logger.debug("Decoded:", result);
 
     return result;
   }
@@ -126,7 +134,7 @@ export class BlueyeClient {
     if (isInProtocol(typeUrl)) {
       const result = (blueye.protocol[typeUrl] as Protocol[T]).decode(value) as DecodedTelOutput<T>;
 
-      this.logger.debug("Result: ", result);
+      this.logger.debug("Result:", result);
 
       return result;
     } else {
