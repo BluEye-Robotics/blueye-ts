@@ -65,14 +65,24 @@ export class BlueyeClient {
     }
 
     return await new Promise((resolve, reject) => {
-      this.wsReqRep.addEventListener("message", event => {
+      const onMessage = (event: MessageEvent) => {
+        cleanUp();
         resolve(event.data as string);
-      });
+      };
 
-      this.wsReqRep.addEventListener("error", error => {
+      const onError = (error: Event) => {
+        cleanUp();
         this.logger.error("[WS] Error:", error);
         reject(error);
-      });
+      };
+
+      const cleanUp = () => {
+        this.wsReqRep.removeEventListener("message", onMessage);
+        this.wsReqRep.removeEventListener("error", onError);
+      };
+
+      this.wsReqRep.addEventListener("message", onMessage);
+      this.wsReqRep.addEventListener("error", onError);
 
       this.wsReqRep.send(data);
     });
