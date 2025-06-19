@@ -51,7 +51,7 @@ export class BlueyeClient {
 
     this.wsPubSub.addEventListener("message", event => {
       const { key, data } = responseSchema.parse(JSON.parse(event.data));
-      const rep = blueye.protocol[key as Req];
+      const rep = blueye.protocol[key as Tel];
       const decoded = rep.decode(data);
 
       this.logger.verbose("[WS] PubSub message:", key, decoded);
