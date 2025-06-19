@@ -28,10 +28,13 @@ const responseSchema = z.object({
     .transform(val => Buffer.from(val, "base64"))
 });
 
-const payloadSchema = z.object({
+const telemetrySchema = z.object({
   payload: z.object({
     typeUrl: z.string().transform(val => val.split(".").at(-1)!),
-    value: z.instanceof(Buffer)
+    value: z
+      .any()
+      .refine(val => val instanceof Buffer || val instanceof Uint8Array)
+      .transform(val => (Buffer.isBuffer(val) ? val : Buffer.from(val)))
   })
 });
 
