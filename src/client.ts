@@ -78,7 +78,7 @@ export class BlueyeClient {
     });
   }
 
-  async sendReqRep<T extends Req>(req: T, opts: CreateArgs<T> = {}): Promise<DecodedOutput<T> | null> {
+  async sendRequest<T extends Req>(req: T, opts: CreateArgs<T> = {}): Promise<DecodedOutput<T> | null> {
     const protocol = blueye.protocol[req];
     const message = protocol.create(opts);
     const encoded = protocol.encode(message as any).finish();
@@ -106,8 +106,8 @@ export class BlueyeClient {
     return result;
   }
 
-  async reqTel<T extends Tel>(type: T): Promise<DecodedTelOutput<T>> {
-    const response = await this.sendReqRep("GetTelemetryReq", { messageType: type });
+  async getTelemetry<T extends Tel>(type: T): Promise<DecodedTelOutput<T>> {
+    const response = await this.sendRequest("GetTelemetryReq", { messageType: type });
     const { payload } = telemetrySchema.parse(response);
     const { typeUrl, value } = payload;
 
