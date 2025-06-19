@@ -99,6 +99,10 @@ class BlueyeClient {
     const rep = blueye.protocol[key as T] as ReqToRep<T>;
     const decoded = rep.decode(data) as DecodeOutput<T>;
 
+    if (req !== "GetTelemetryReq") {
+      return decoded;
+    }
+
     console.log("Decoded: ", decoded);
 
     const { payload } = telemetrySchema.parse(decoded);
