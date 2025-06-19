@@ -57,7 +57,8 @@ export class BlueyeClient {
 
   private async send(data: string): Promise<string> {
     while (!this.isReqRepConnected) {
-      await new Promise(res => setTimeout(res, 250));
+      console.log("waiting");
+      await new Promise(res => setTimeout(res, 50));
     }
 
     return await new Promise((resolve, reject) => {
