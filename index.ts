@@ -7,8 +7,7 @@ const WS_REQREP_URL = "ws://localhost:8766";
 
 type Protocol = typeof blueye.protocol;
 type ReqKeys = Extract<keyof Protocol, `${string}Req`>;
-type ReqsOnly = Pick<Protocol, ReqKeys>;
-type Req = keyof ReqsOnly;
+type Req = keyof Pick<Protocol, ReqKeys>;
 
 type MsgHandler<T extends Req> = Protocol[T];
 type CreateArgs<T extends Req> = Parameters<MsgHandler<T>["create"]>[0];
