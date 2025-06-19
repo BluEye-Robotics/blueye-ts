@@ -1,15 +1,22 @@
 {
   "name": "@blueyerobotics/blueye-ts",
   "version": "1.0.0",
-  "description": "",
+  "description": "A TypeScript client for interacting with Blueye underwater drones.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/BluEye-Robotics/blueye-ts.git"
+  },
   "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
   "scripts": {
-    "start": "node dist/index.js",
+    "start": "node dist/example.js",
     "build": "tsc"
   },
   "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "author": "Blueye <contact@blueye.no> (https://blueye.no/)",
   "dependencies": {
     "@blueyerobotics/protocol-definitions": "3.2.0-3e0ba702",
     "buffer": "^6.0.3",

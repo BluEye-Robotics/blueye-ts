@@ -7,30 +7,30 @@ import { responseSchema, telemetrySchema } from "./schema";
 const WS_PUBSUB_URL = "ws://localhost:8765";
 const WS_REQREP_URL = "ws://localhost:8766";
 
-type Protocol = typeof blueye.protocol;
+export type Protocol = typeof blueye.protocol;
 
-type ReqKeys = Extract<keyof Protocol, `${string}Req`>;
-type Req = keyof Pick<Protocol, ReqKeys>;
+export type ReqKeys = Extract<keyof Protocol, `${string}Req`>;
+export type Req = keyof Pick<Protocol, ReqKeys>;
 
-type TelKeys = Extract<keyof Protocol, `${string}Tel`>;
-type Tel = keyof Pick<Protocol, TelKeys>;
+export type TelKeys = Extract<keyof Protocol, `${string}Tel`>;
+export type Tel = keyof Pick<Protocol, TelKeys>;
 
-type ReqToRep<T extends Req> = T extends `${infer Prefix}Req`
+export type ReqToRep<T extends Req> = T extends `${infer Prefix}Req`
   ? `${Prefix}Rep` extends keyof Protocol
     ? Protocol[`${Prefix}Rep`]
     : never
   : never;
 
-type MsgHandler<T extends Req> = Protocol[T];
-type CreateArgs<T extends Req> = Parameters<MsgHandler<T>["create"]>[0];
-type DecodedOutput<T extends Req> = ReturnType<ReqToRep<T>["decode"]>;
-type DecodedTelOutput<T extends Tel> = ReturnType<Protocol[T]["decode"]>;
+export type MsgHandler<T extends Req> = Protocol[T];
+export type CreateArgs<T extends Req> = Parameters<MsgHandler<T>["create"]>[0];
+export type DecodedOutput<T extends Req> = ReturnType<ReqToRep<T>["decode"]>;
+export type DecodedTelOutput<T extends Tel> = ReturnType<Protocol[T]["decode"]>;
 
-type Events = {
+export type Events = {
   [K in Tel]: [DecodedTelOutput<K>];
 };
 
-const isInProtocol = (key: string): key is keyof typeof blueye.protocol => {
+export const isInProtocol = (key: string): key is keyof typeof blueye.protocol => {
   return key in blueye.protocol;
 };
 
