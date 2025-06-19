@@ -18,6 +18,8 @@ type ReqToRep<T extends Req> = T extends `${infer Prefix}Req`
     : never
   : never;
 
+type DecodeOutput<T extends Req> = ReturnType<ReqToRep<T>["decode"]>;
+
 const responseSchema = z.object({
   key: z.string().transform(val => val.split(".").at(-1)!),
   data: z
@@ -79,7 +81,7 @@ class BlueyeClient {
     });
   }
 
-  async sendReqRep<T extends Req>(req: T, opts: CreateArgs<T>) {
+  async sendReqRep<T extends Req>(req: T, opts: CreateArgs<T> = {}): Promise<DecodeOutput<T> | null> {
     const protocol = blueye.protocol[req];
     const message = protocol.create(opts);
     const encoded = protocol.encode(message as any).finish();
@@ -95,22 +97,27 @@ class BlueyeClient {
 
     const { key, data } = responseSchema.parse(JSON.parse(response));
     const rep = blueye.protocol[key as T] as ReqToRep<T>;
-    const decoded = rep.decode(data);
-    const { payload } = payloadSchema.parse(decoded);
+    const decoded = rep.decode(data) as DecodeOutput<T>;
+
+    console.log("Decoded: ", decoded);
+
+    const { payload } = telemetrySchema.parse(decoded);
     const { typeUrl, value } = payload;
-    let result;
+    let result: DecodeOutput<T>;
+
+    console.log(typeUrl);
 
     if (isInProtocol(typeUrl)) {
-      // @ts-ignore
+      // @ts-expect-error
       result = blueye.protocol[typeUrl].decode(value);
     } else if (isInGoogleProtocol(typeUrl)) {
-      result = google.protobuf[typeUrl].decode(value);
+      result = google.protobuf[typeUrl].decode(value) as DecodeOutput<T>;
     } else {
       throw new Error("Unknown typeUrl");
     }
 
     console.log("Result: ", result);
-    return result as ReturnType<ReqToRep<T>["decode"]>;
+    return result;
   }
 }
 
