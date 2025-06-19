@@ -1,6 +1,6 @@
 import { blueye, google } from "@blueyerobotics/protocol-definitions";
 import { Buffer } from "buffer";
-import { z } from "zod";
+import { responseSchema, telemetrySchema } from "./src/schema";
 
 const WS_PUBSUB_URL = "ws://localhost:8765";
 const WS_REQREP_URL = "ws://localhost:8766";
@@ -23,24 +23,6 @@ type MsgHandler<T extends Req> = Protocol[T];
 type CreateArgs<T extends Req> = Parameters<MsgHandler<T>["create"]>[0];
 type DecodedOutput<T extends Req> = ReturnType<ReqToRep<T>["decode"]>;
 type DecodedTelOutput<T extends Tel> = ReturnType<Protocol[T]["decode"]>;
-
-const responseSchema = z.object({
-  key: z.string().transform(val => val.split(".").at(-1)!),
-  data: z
-    .string()
-    .base64()
-    .transform(val => Buffer.from(val, "base64"))
-});
-
-const telemetrySchema = z.object({
-  payload: z.object({
-    typeUrl: z.string().transform(val => val.split(".").at(-1)!),
-    value: z
-      .any()
-      .refine(val => val instanceof Buffer || val instanceof Uint8Array)
-      .transform(val => (Buffer.isBuffer(val) ? val : Buffer.from(val)))
-  })
-});
 
 const isInProtocol = (key: string): key is keyof typeof blueye.protocol => {
   return key in blueye.protocol;
