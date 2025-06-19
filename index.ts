@@ -63,6 +63,14 @@ class BlueyeClient {
       this.isReqRepConnected = true;
       console.log("[WS] ReqRep connected");
     });
+
+    this.wsPubSub.addEventListener("message", event => {
+      const { key, data } = responseSchema.parse(JSON.parse(event.data));
+      const rep = blueye.protocol[key as Req];
+      const decoded = rep.decode(data);
+
+      console.log("[WS] PubSub message:", key, decoded);
+    });
   }
 
   private async send(data: string): Promise<string> {
