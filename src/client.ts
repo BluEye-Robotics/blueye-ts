@@ -2,6 +2,8 @@ import { blueye } from "@blueyerobotics/protocol-definitions";
 import { Buffer } from "buffer";
 import { ConsolaInstance, createConsola, LogLevel, LogLevels } from "consola";
 import { Emitter } from "strict-event-emitter";
+import { v4 as uuidv4 } from "uuid";
+import z from "zod";
 import { responseSchema, telemetrySchema } from "./schema";
 
 const WS_PUBSUB_URL = "ws://localhost:8765";
@@ -39,6 +41,7 @@ export class BlueyeClient {
   private wsReqRep: WebSocket;
   private isReqRepConnected = false;
   private logger: ConsolaInstance;
+  private pendingRequests: Map<string, (response: z.infer<typeof responseSchema>) => void> = new Map();
 
   sub = new Emitter<Events>();
 
@@ -64,35 +67,16 @@ export class BlueyeClient {
       this.logger.verbose("[WS] PubSub message:", key, message);
       this.sub.emit(key as Tel, message as any);
     });
-  }
 
-  private async send(data: string): Promise<string> {
-    while (!this.isReqRepConnected) {
-      this.logger.debug("Waiting...");
-      await new Promise(res => setTimeout(res, 50));
-    }
+    this.wsReqRep.addEventListener("message", event => {
+      this.logger.debug("Response:", event.data);
 
-    return await new Promise((resolve, reject) => {
-      const onMessage = (event: MessageEvent) => {
-        cleanUp();
-        resolve(event.data as string);
-      };
+      const { id, key, data } = responseSchema.parse(JSON.parse(event.data));
 
-      const onError = (error: Event) => {
-        cleanUp();
-        this.logger.error("[WS] Error:", error);
-        reject(error);
-      };
+      if (!id) throw new Error("Response id is missing");
 
-      const cleanUp = () => {
-        this.wsReqRep.removeEventListener("message", onMessage);
-        this.wsReqRep.removeEventListener("error", onError);
-      };
-
-      this.wsReqRep.addEventListener("message", onMessage);
-      this.wsReqRep.addEventListener("error", onError);
-
-      this.wsReqRep.send(data);
+      this.pendingRequests.get(id)?.({ key, data });
+      this.pendingRequests.delete(id);
     });
   }
 
@@ -101,16 +85,22 @@ export class BlueyeClient {
     const message = protocol.create(opts);
     const encoded = protocol.encode(message as any).finish();
 
-    const response = await this.send(
-      JSON.stringify({
+    while (!this.isReqRepConnected) {
+      this.logger.debug("Waiting...");
+      await new Promise(res => setTimeout(res, 50));
+    }
+
+    const { key, data } = await new Promise<z.infer<typeof responseSchema>>((resolve, reject) => {
+      const id = uuidv4();
+      const request = JSON.stringify({
+        id,
         key: `blueye.protocol.${req}`,
         data: Buffer.from(encoded).toString("base64")
-      })
-    );
+      });
 
-    this.logger.debug("Response:", response);
-
-    const { key, data } = responseSchema.parse(JSON.parse(response));
+      this.pendingRequests.set(id, resolve);
+      this.wsReqRep.send(request);
+    });
 
     if (key === "Empty") {
       return null;

@@ -2,6 +2,7 @@ import { Buffer } from "buffer";
 import z from "zod";
 
 export const responseSchema = z.object({
+  id: z.string().uuid().optional(),
   key: z.string().transform(val => val.split(".").at(-1)!),
   data: z
     .string()

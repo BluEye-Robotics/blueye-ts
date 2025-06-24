@@ -20,6 +20,9 @@ importers:
       strict-event-emitter:
         specifier: ^0.5.1
         version: 0.5.1
+      uuid:
+        specifier: ^11.1.0
+        version: 11.1.0
       zod:
         specifier: ^3.25.67
         version: 3.25.67
@@ -57,6 +60,10 @@ packages:
     engines: {node: '>=14.17'}
     hasBin: true
 
+  uuid@11.1.0:
+    resolution: {integrity: sha512-0/A9rDy9P7cJ+8w1c9WD9V//9Wj15Ce2MPz8Ri6032usz+NfePxx5AcN3bN+r6ZL6jEo066/yNYB3tn4pQEx+A==}
+    hasBin: true
+
   zod@3.25.67:
     resolution: {integrity: sha512-idA2YXwpCdqUSKRCACDE6ItZD9TZzy3OZMtpfLoh6oPR47lipysRrJfjzMqFxQ3uJuUPyUeWe1r9vLH33xO/Qw==}
 
@@ -82,5 +89,7 @@ snapshots:
   strict-event-emitter@0.5.1: {}
 
   typescript@5.8.3: {}
+
+  uuid@11.1.0: {}
 
   zod@3.25.67: {}
