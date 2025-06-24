@@ -90,17 +90,20 @@ export class BlueyeClient {
       await new Promise(res => setTimeout(res, 50));
     }
 
-    const { key, data } = await new Promise<z.infer<typeof responseSchema>>((resolve, reject) => {
-      const id = uuidv4();
-      const request = JSON.stringify({
-        id,
-        key: `blueye.protocol.${req}`,
-        data: Buffer.from(encoded).toString("base64")
-      });
+    const { key, data } = await Promise.race([
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Request timed out")), 2000)),
+      new Promise<z.infer<typeof responseSchema>>(resolve => {
+        const id = uuidv4();
+        const request = JSON.stringify({
+          id,
+          key: `blueye.protocol.${req}`,
+          data: Buffer.from(encoded).toString("base64")
+        });
 
-      this.pendingRequests.set(id, resolve);
-      this.wsReqRep.send(request);
-    });
+        this.pendingRequests.set(id, resolve);
+        this.wsReqRep.send(request);
+      })
+    ]);
 
     if (key === "Empty") {
       return null;
