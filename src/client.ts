@@ -45,7 +45,7 @@ export class BlueyeClient {
 
   sub = new Emitter<Events>();
 
-  constructor(logLevel: LogLevel = LogLevels.info) {
+  constructor(public timeout = 2000, logLevel: LogLevel = LogLevels.info) {
     this.logger = createConsola({ level: logLevel, formatOptions: { colors: true, compact: false } });
     this.wsPubSub = new WebSocket(WS_PUBSUB_URL);
     this.wsReqRep = new WebSocket(WS_REQREP_URL);
@@ -92,7 +92,7 @@ export class BlueyeClient {
     const id = uuidv4();
 
     const { key, data } = await Promise.race([
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Request timed out")), 2000)),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Request timed out")), this.timeout)),
       new Promise<z.infer<typeof responseSchema>>(resolve => {
         const request = JSON.stringify({
           id,
