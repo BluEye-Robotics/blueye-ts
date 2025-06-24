@@ -76,7 +76,6 @@ export class BlueyeClient {
       if (!id) throw new Error("Response id is missing");
 
       this.pendingRequests.get(id)?.({ key, data });
-      this.pendingRequests.delete(id);
     });
   }
 
@@ -90,10 +89,11 @@ export class BlueyeClient {
       await new Promise(res => setTimeout(res, 50));
     }
 
+    const id = uuidv4();
+
     const { key, data } = await Promise.race([
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Request timed out")), 2000)),
       new Promise<z.infer<typeof responseSchema>>(resolve => {
-        const id = uuidv4();
         const request = JSON.stringify({
           id,
           key: `blueye.protocol.${req}`,
@@ -104,6 +104,8 @@ export class BlueyeClient {
         this.wsReqRep.send(request);
       })
     ]);
+
+    this.pendingRequests.delete(id);
 
     if (key === "Empty") {
       return null;
