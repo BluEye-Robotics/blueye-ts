@@ -10,15 +10,16 @@ const WS_PUBSUB_URL = "ws://localhost:8765";
 const WS_REQREP_URL = "ws://localhost:8766";
 
 export type Protocol = typeof blueye.protocol;
+export type ProtocolType = "Req" | "Rep" | "Tel" | "Ctrl";
+export type ProtocolKey = Extract<keyof Protocol, `${string}${ProtocolType}`>;
 
-export type ReqKeys = Extract<keyof Protocol, `${string}Req`>;
-export type Req = keyof Pick<Protocol, ReqKeys>;
-
-export type TelKeys = Extract<keyof Protocol, `${string}Tel`>;
-export type Tel = keyof Pick<Protocol, TelKeys>;
+export type Req = keyof Pick<Protocol, Extract<ProtocolKey, `${string}Req`>>;
+export type Rep = keyof Pick<Protocol, Extract<ProtocolKey, `${string}Rep`>>;
+export type Tel = keyof Pick<Protocol, Extract<ProtocolKey, `${string}Tel`>>;
+export type Ctrl = keyof Pick<Protocol, Extract<ProtocolKey, `${string}Ctrl`>>;
 
 export type ReqToRep<T extends Req> = T extends `${infer Prefix}Req`
-  ? `${Prefix}Rep` extends keyof Protocol
+  ? `${Prefix}Rep` extends ProtocolKey
     ? Protocol[`${Prefix}Rep`]
     : never
   : never;
