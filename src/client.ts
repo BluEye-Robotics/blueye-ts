@@ -6,8 +6,8 @@ import { v4 as uuidv4 } from "uuid";
 import z from "zod";
 import { responseSchema, telemetrySchema } from "./schema";
 
-const WS_PUBSUB_URL = "ws://localhost:8765";
-const WS_REQREP_URL = "ws://localhost:8766";
+const WS_PUBSUB_URL = "ws://192.168.1.101:8765";
+const WS_REQREP_URL = "ws://192.168.1.101:8766";
 
 export type Protocol = typeof blueye.protocol;
 export type ProtocolType = "Req" | "Rep" | "Tel" | "Ctrl";
