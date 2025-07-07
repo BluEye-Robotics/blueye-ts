@@ -60,6 +60,12 @@ export class BlueyeClient extends Emitter<Events> {
     // @ts-ignore
     this.sub.on("message", (topic, msg) => {
       const { key, data } = responseSchema.parse({ key: topic, data: msg });
+
+      if (!isInProtocol(key) || !key.endsWith("Tel")) {
+        this.logger.warn("[sub] unknown protocol:", key);
+        return;
+      }
+
       const protocol = blueye.protocol[key as Tel];
       const message = protocol.decode(data);
 
@@ -69,6 +75,10 @@ export class BlueyeClient extends Emitter<Events> {
   }
 
   async sendRequest<T extends Req>(req: T, opts: CreateArgs<T> = {}): Promise<DecodedOutput<T> | null> {
+    if (!isInProtocol(req) || !req.endsWith("Req")) {
+      throw new Error(`[rpc] unknown protocol: ${req}`);
+    }
+
     const protocol = blueye.protocol[req];
     const message = protocol.create(opts);
     const encoded = protocol.encode(message as any).finish();
@@ -89,6 +99,10 @@ export class BlueyeClient extends Emitter<Events> {
       return null;
     }
 
+    if (!isInProtocol(key) || !key.endsWith("Rep")) {
+      throw new Error(`[rpc] unknown response protocol: ${key}`);
+    }
+
     const rep = blueye.protocol[key as T] as ReqToRep<T>;
     const result = rep.decode(data) as DecodedOutput<T>;
 
@@ -102,20 +116,20 @@ export class BlueyeClient extends Emitter<Events> {
     const { payload } = telemetrySchema.parse(response);
     const { typeUrl, value } = payload;
 
-    if (isInProtocol(typeUrl)) {
-      const result = (blueye.protocol[typeUrl] as Protocol[T]).decode(value) as DecodedTelOutput<T>;
-
-      this.logger.debug("[rpc] result:", result);
-
-      return result;
-    } else {
-      throw new Error("[rpc] unknown typeUrl");
+    if (!isInProtocol(typeUrl) || !typeUrl.endsWith("Tel")) {
+      throw new Error(`[rpc] unknown telemetry typeUrl: ${typeUrl}`);
     }
+
+    const result = (blueye.protocol[typeUrl] as Protocol[T]).decode(value) as DecodedTelOutput<T>;
+
+    this.logger.debug("[rpc] result:", result);
+
+    return result;
   }
 
   async sendControl<T extends Ctrl>(ctrl: T, opts: CreateArgs<T> = {}) {
-    if (!isInProtocol(ctrl)) {
-      throw new Error(`[pub] unknown control command: ${ctrl}`);
+    if (!isInProtocol(ctrl) || !ctrl.endsWith("Ctrl")) {
+      throw new Error(`[pub] unknown protocol: ${ctrl}`);
     }
 
     const protocol = blueye.protocol[ctrl];
