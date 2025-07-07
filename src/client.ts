@@ -8,6 +8,7 @@ import { responseSchema, telemetrySchema } from "./schema";
 
 const SUB_URL = "ws://192.168.1.101:9985";
 const RPC_URL = "ws://192.168.1.101:9986";
+const PUB_URL = "ws://192.168.1.101:9987";
 
 export type Protocol = typeof blueye.protocol;
 export type ProtocolType = "Req" | "Rep" | "Tel" | "Ctrl";
@@ -24,8 +25,8 @@ export type ReqToRep<T extends Req> = T extends `${infer Prefix}Req`
     : never
   : never;
 
-export type MsgHandler<T extends Req> = Protocol[T];
-export type CreateArgs<T extends Req> = Parameters<MsgHandler<T>["create"]>[0];
+export type MsgHandler<T extends Req | Ctrl> = Protocol[T];
+export type CreateArgs<T extends Req | Ctrl> = Parameters<MsgHandler<T>["create"]>[0];
 export type DecodedOutput<T extends Req> = ReturnType<ReqToRep<T>["decode"]>;
 export type DecodedTelOutput<T extends Tel> = ReturnType<Protocol[T]["decode"]>;
 
@@ -40,6 +41,7 @@ export const isInProtocol = (key: string): key is keyof typeof blueye.protocol =
 export class BlueyeClient extends Emitter<Events> {
   private sub: ZMQSub;
   private rpc: ZMQRep;
+  private pub: ZMQPub;
   private logger: ConsolaInstance;
 
   constructor(public timeout = 2000, logLevel: LogLevel = LogLevels.info) {
@@ -48,10 +50,12 @@ export class BlueyeClient extends Emitter<Events> {
     this.logger = createConsola({ level: logLevel, formatOptions: { colors: true, compact: false } });
     this.sub = new ZMQSub();
     this.rpc = new ZMQRep();
+    this.pub = new ZMQPub();
 
     this.sub.subscribe("");
     this.sub.connect(SUB_URL);
     this.rpc.connect(RPC_URL);
+    this.pub.connect(PUB_URL);
 
     // @ts-ignore
     this.sub.on("message", (topic, msg) => {
@@ -107,5 +111,18 @@ export class BlueyeClient extends Emitter<Events> {
     } else {
       throw new Error("[rpc] unknown typeUrl");
     }
+  }
+
+  async sendControl<T extends Ctrl>(ctrl: T, opts: CreateArgs<T> = {}) {
+    if (!isInProtocol(ctrl)) {
+      throw new Error(`[pub] unknown control command: ${ctrl}`);
+    }
+
+    const protocol = blueye.protocol[ctrl];
+    const message = protocol.create(opts);
+    const encoded = protocol.encode(message as any).finish();
+
+    this.logger.debug("[pub] sending control:", ctrl, message);
+    this.pub.send([Buffer.from(`blueye.protocol.${ctrl}`), Buffer.from(encoded)]);
   }
 }
