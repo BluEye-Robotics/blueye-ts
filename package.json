@@ -1,6 +1,6 @@
 {
   "name": "@blueyerobotics/blueye-ts",
-  "version": "1.5.0",
+  "version": "2.0.0",
   "description": "A TypeScript client for interacting with Blueye underwater drones.",
   "repository": {
     "type": "git",
