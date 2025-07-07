@@ -1,13 +1,13 @@
 import { blueye } from "@blueyerobotics/protocol-definitions";
 import { Buffer } from "buffer";
 import { ConsolaInstance, createConsola, LogLevel, LogLevels } from "consola";
+import { Pub as ZMQPub, Req as ZMQRep, Sub as ZMQSub } from "jszmq";
 import { Emitter } from "strict-event-emitter";
-import { v4 as uuidv4 } from "uuid";
 import z from "zod";
 import { responseSchema, telemetrySchema } from "./schema";
 
-const WS_PUBSUB_URL = "ws://192.168.1.101:8765";
-const WS_REQREP_URL = "ws://192.168.1.101:8766";
+const SUB_URL = "ws://192.168.1.101:9985";
+const RPC_URL = "ws://192.168.1.101:9986";
 
 export type Protocol = typeof blueye.protocol;
 export type ProtocolType = "Req" | "Rep" | "Tel" | "Ctrl";
@@ -37,46 +37,30 @@ export const isInProtocol = (key: string): key is keyof typeof blueye.protocol =
   return key in blueye.protocol;
 };
 
-export class BlueyeClient {
-  private wsPubSub: WebSocket;
-  private wsReqRep: WebSocket;
-  private isReqRepConnected = false;
+export class BlueyeClient extends Emitter<Events> {
+  private sub: ZMQSub;
+  private rpc: ZMQRep;
   private logger: ConsolaInstance;
-  private pendingRequests: Map<string, (response: z.infer<typeof responseSchema>) => void> = new Map();
-
-  sub = new Emitter<Events>();
 
   constructor(public timeout = 2000, logLevel: LogLevel = LogLevels.info) {
+    super();
+
     this.logger = createConsola({ level: logLevel, formatOptions: { colors: true, compact: false } });
-    this.wsPubSub = new WebSocket(WS_PUBSUB_URL);
-    this.wsReqRep = new WebSocket(WS_REQREP_URL);
+    this.sub = new ZMQSub();
+    this.rpc = new ZMQRep();
 
-    this.wsPubSub.addEventListener("open", () => {
-      this.logger.info("[WS] PubSub connected");
-    });
+    this.sub.subscribe("");
+    this.sub.connect(SUB_URL);
+    this.rpc.connect(RPC_URL);
 
-    this.wsReqRep.addEventListener("open", () => {
-      this.isReqRepConnected = true;
-      this.logger.info("[WS] ReqRep connected");
-    });
-
-    this.wsPubSub.addEventListener("message", event => {
-      const { key, data } = responseSchema.parse(JSON.parse(event.data));
+    // @ts-ignore
+    this.sub.on("message", (topic, msg) => {
+      const { key, data } = responseSchema.parse({ key: topic, data: msg });
       const protocol = blueye.protocol[key as Tel];
       const message = protocol.decode(data);
 
-      this.logger.verbose("[WS] PubSub message:", key, message);
-      this.sub.emit(key as Tel, message as any);
-    });
-
-    this.wsReqRep.addEventListener("message", event => {
-      this.logger.debug("Response:", event.data);
-
-      const { id, key, data } = responseSchema.parse(JSON.parse(event.data));
-
-      if (!id) throw new Error("Response id is missing");
-
-      this.pendingRequests.get(id)?.({ key, data });
+      this.logger.verbose("[sub] message:", key, message);
+      this.emit(key as Tel, message as any);
     });
   }
 
@@ -85,28 +69,17 @@ export class BlueyeClient {
     const message = protocol.create(opts);
     const encoded = protocol.encode(message as any).finish();
 
-    while (!this.isReqRepConnected) {
-      this.logger.debug("Waiting...");
-      await new Promise(res => setTimeout(res, 50));
-    }
-
-    const id = uuidv4();
-
     const { key, data } = await Promise.race([
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Request timed out")), this.timeout)),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("[rpc] request timed out")), this.timeout)),
       new Promise<z.infer<typeof responseSchema>>(resolve => {
-        const request = JSON.stringify({
-          id,
-          key: `blueye.protocol.${req}`,
-          data: Buffer.from(encoded).toString("base64")
+        // @ts-ignore
+        this.rpc.once("message", (topic, msg) => {
+          resolve({ key: topic.toString().split(".").at(-1), data: msg });
         });
 
-        this.pendingRequests.set(id, resolve);
-        this.wsReqRep.send(request);
+        this.rpc.send([Buffer.from(`blueye.protocol.${req}`), Buffer.from(encoded)]);
       })
     ]);
-
-    this.pendingRequests.delete(id);
 
     if (key === "Empty") {
       return null;
@@ -115,7 +88,7 @@ export class BlueyeClient {
     const rep = blueye.protocol[key as T] as ReqToRep<T>;
     const result = rep.decode(data) as DecodedOutput<T>;
 
-    this.logger.debug("Decoded:", result);
+    this.logger.debug("[rpc] decoded:", result);
 
     return result;
   }
@@ -125,16 +98,14 @@ export class BlueyeClient {
     const { payload } = telemetrySchema.parse(response);
     const { typeUrl, value } = payload;
 
-    this.logger.debug(typeUrl);
-
     if (isInProtocol(typeUrl)) {
       const result = (blueye.protocol[typeUrl] as Protocol[T]).decode(value) as DecodedTelOutput<T>;
 
-      this.logger.debug("Result:", result);
+      this.logger.debug("[rpc] result:", result);
 
       return result;
     } else {
-      throw new Error("Unknown typeUrl");
+      throw new Error("[rpc] unknown typeUrl");
     }
   }
 }

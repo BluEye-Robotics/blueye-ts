@@ -9,7 +9,7 @@ const main = async () => {
   console.log("Rep:", rep);
   console.log("Tel:", tel);
 
-  client.sub.on("BatteryTel", data => {
+  client.on("BatteryTel", data => {
     console.log("Received BatteryTel:", data);
   });
 };
