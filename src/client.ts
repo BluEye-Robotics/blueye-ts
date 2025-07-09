@@ -6,9 +6,9 @@ import { Emitter } from "strict-event-emitter";
 import z from "zod";
 import { responseSchema, telemetrySchema } from "./schema";
 
-const SUB_URL = "ws://192.168.1.101:9985";
-const RPC_URL = "ws://192.168.1.101:9986";
-const PUB_URL = "ws://192.168.1.101:9987";
+const DEFAULT_SUB_URL = "ws://192.168.1.101:9985";
+const DEFAULT_RPC_URL = "ws://192.168.1.101:9986";
+const DEFAULT_PUB_URL = "ws://192.168.1.101:9987";
 
 export type Protocol = typeof blueye.protocol;
 export type ProtocolType = "Req" | "Rep" | "Tel" | "Ctrl";
@@ -42,17 +42,43 @@ export const isInProtocol = (key: string): key is keyof typeof blueye.protocol =
   return key in blueye.protocol;
 };
 
+type Options = Partial<{
+  subUrl: string;
+  rpcUrl: string;
+  pubUrl: string;
+  timeout: number;
+  logLevel: LogLevel;
+  autoConnect: boolean;
+}>;
+
 export class BlueyeClient extends Emitter<Events> {
   public state: State = "disconnected";
+  public timeout: number;
+
+  private subUrl: string;
+  private rpcUrl: string;
+  private pubUrl: string;
+
   private sub: ZMQSub;
   private rpc: ZMQRep;
   private pub: ZMQPub;
   private logger: ConsolaInstance;
 
-  constructor(public timeout = 2000, logLevel: LogLevel = LogLevels.info) {
+  constructor({
+    subUrl = DEFAULT_SUB_URL,
+    rpcUrl = DEFAULT_RPC_URL,
+    pubUrl = DEFAULT_PUB_URL,
+    timeout = 2000,
+    logLevel = LogLevels.info,
+    autoConnect = false
+  }: Options = {}) {
     super();
 
+    this.timeout = timeout;
     this.logger = createConsola({ level: logLevel, formatOptions: { colors: true, compact: false } });
+    this.subUrl = subUrl;
+    this.rpcUrl = rpcUrl;
+    this.pubUrl = pubUrl;
     this.sub = new ZMQSub();
     this.rpc = new ZMQRep();
     this.pub = new ZMQPub();
@@ -73,6 +99,11 @@ export class BlueyeClient extends Emitter<Events> {
       this.emit(key as Tel, message as any);
     });
 
+    if (autoConnect) {
+      this.connect();
+    }
+  }
+
   private updateState(newState: State) {
     this.state = newState;
     this.logger.info(`[client] ${newState}`);
@@ -92,9 +123,9 @@ export class BlueyeClient extends Emitter<Events> {
 
     this.updateState("connecting");
     this.sub.subscribe("");
-    this.sub.connect(SUB_URL);
-    this.rpc.connect(RPC_URL);
-    this.pub.connect(PUB_URL);
+    this.sub.connect(this.subUrl);
+    this.rpc.connect(this.rpcUrl);
+    this.pub.connect(this.pubUrl);
     this.updateState("connected");
   }
 
@@ -110,9 +141,9 @@ export class BlueyeClient extends Emitter<Events> {
     }
 
     this.sub.unsubscribe("");
-    this.sub.disconnect(SUB_URL);
-    this.rpc.disconnect(RPC_URL);
-    this.pub.disconnect(PUB_URL);
+    this.sub.disconnect(this.subUrl);
+    this.rpc.disconnect(this.rpcUrl);
+    this.pub.disconnect(this.pubUrl);
     this.updateState("disconnected");
   }
 
