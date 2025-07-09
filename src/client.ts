@@ -30,7 +30,11 @@ export type CreateArgs<T extends Req | Ctrl> = Parameters<MsgHandler<T>["create"
 export type DecodedOutput<T extends Req> = ReturnType<ReqToRep<T>["decode"]>;
 export type DecodedTelOutput<T extends Tel> = ReturnType<Protocol[T]["decode"]>;
 
+type State = "connecting" | "connected" | "disconnected";
+
 export type Events = {
+  [K in State]: [];
+} & {
   [K in Tel]: [DecodedTelOutput<K>];
 };
 
@@ -39,6 +43,7 @@ export const isInProtocol = (key: string): key is keyof typeof blueye.protocol =
 };
 
 export class BlueyeClient extends Emitter<Events> {
+  public state: State = "disconnected";
   private sub: ZMQSub;
   private rpc: ZMQRep;
   private pub: ZMQPub;
@@ -51,11 +56,6 @@ export class BlueyeClient extends Emitter<Events> {
     this.sub = new ZMQSub();
     this.rpc = new ZMQRep();
     this.pub = new ZMQPub();
-
-    this.sub.subscribe("");
-    this.sub.connect(SUB_URL);
-    this.rpc.connect(RPC_URL);
-    this.pub.connect(PUB_URL);
 
     // @ts-ignore
     this.sub.on("message", (topic, msg) => {
@@ -72,6 +72,48 @@ export class BlueyeClient extends Emitter<Events> {
       this.logger.verbose("[sub] message:", key, message);
       this.emit(key as Tel, message as any);
     });
+
+  private updateState(newState: State) {
+    this.state = newState;
+    this.logger.info(`[client] ${newState}`);
+    this.emit(newState);
+  }
+
+  connect() {
+    if (this.state === "connected") {
+      this.logger.warn("[client] already connected");
+      return;
+    }
+
+    if (this.state === "connecting") {
+      this.logger.warn("[client] already connecting");
+      return;
+    }
+
+    this.updateState("connecting");
+    this.sub.subscribe("");
+    this.sub.connect(SUB_URL);
+    this.rpc.connect(RPC_URL);
+    this.pub.connect(PUB_URL);
+    this.updateState("connected");
+  }
+
+  disconnect() {
+    if (this.state === "disconnected") {
+      this.logger.warn("[client] already disconnected");
+      return;
+    }
+
+    if (this.state === "connecting") {
+      this.logger.warn("[client] cannot disconnect while connecting");
+      return;
+    }
+
+    this.sub.unsubscribe("");
+    this.sub.disconnect(SUB_URL);
+    this.rpc.disconnect(RPC_URL);
+    this.pub.disconnect(PUB_URL);
+    this.updateState("disconnected");
   }
 
   async sendRequest<T extends Req>(req: T, opts: CreateArgs<T> = {}): Promise<DecodedOutput<T> | null> {
