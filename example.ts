@@ -17,7 +17,7 @@ const main = async () => {
   });
 
   // subscribe to battery telemetry updates
-  client.on("BatteryTel", data => {
+  client.on("BatteryTel", (data) => {
     console.log("received BatteryTel:", data);
   });
 

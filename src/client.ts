@@ -26,7 +26,9 @@ export type ReqToRep<T extends Req> = T extends `${infer Prefix}Req`
   : never;
 
 export type MsgHandler<T extends Req | Ctrl> = Protocol[T];
-export type CreateArgs<T extends Req | Ctrl> = Parameters<MsgHandler<T>["create"]>[0];
+export type CreateArgs<T extends Req | Ctrl> = Parameters<
+  MsgHandler<T>["create"]
+>[0];
 export type DecodedOutput<T extends Req> = ReturnType<ReqToRep<T>["decode"]>;
 export type DecodedTelOutput<T extends Tel> = ReturnType<Protocol[T]["decode"]>;
 
@@ -38,7 +40,9 @@ export type Events = {
   [K in Tel]: [DecodedTelOutput<K>];
 };
 
-export const isInProtocol = (key: string): key is keyof typeof blueye.protocol => {
+export const isInProtocol = (
+  key: string,
+): key is keyof typeof blueye.protocol => {
   return key in blueye.protocol;
 };
 
@@ -70,12 +74,15 @@ export class BlueyeClient extends Emitter<Events> {
     pubUrl = DEFAULT_PUB_URL,
     timeout = 2000,
     logLevel = LogLevels.info,
-    autoConnect = false
+    autoConnect = false,
   }: Options = {}) {
     super();
 
     this.timeout = timeout;
-    this.logger = createConsola({ level: logLevel, formatOptions: { colors: true, compact: false } });
+    this.logger = createConsola({
+      level: logLevel,
+      formatOptions: { colors: true, compact: false },
+    });
     this.subUrl = subUrl;
     this.rpcUrl = rpcUrl;
     this.pubUrl = pubUrl;
@@ -147,7 +154,10 @@ export class BlueyeClient extends Emitter<Events> {
     this.updateState("disconnected");
   }
 
-  async sendRequest<T extends Req>(req: T, opts: CreateArgs<T> = {}): Promise<DecodedOutput<T> | null> {
+  async sendRequest<T extends Req>(
+    req: T,
+    opts: CreateArgs<T> = {},
+  ): Promise<DecodedOutput<T> | null> {
     if (!isInProtocol(req) || !req.endsWith("Req")) {
       throw new Error(`[rpc] unknown protocol: ${req}`);
     }
@@ -157,15 +167,23 @@ export class BlueyeClient extends Emitter<Events> {
     const encoded = protocol.encode(message as any).finish();
 
     const { key, data } = await Promise.race([
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("[rpc] request timed out")), this.timeout)),
-      new Promise<z.infer<typeof responseSchema>>(resolve => {
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error("[rpc] request timed out")),
+          this.timeout,
+        ),
+      ),
+      new Promise<z.infer<typeof responseSchema>>((resolve) => {
         // @ts-ignore
         this.rpc.once("message", (topic, msg) => {
           resolve({ key: topic.toString().split(".").at(-1), data: msg });
         });
 
-        this.rpc.send([Buffer.from(`blueye.protocol.${req}`), Buffer.from(encoded)]);
-      })
+        this.rpc.send([
+          Buffer.from(`blueye.protocol.${req}`),
+          Buffer.from(encoded),
+        ]);
+      }),
     ]);
 
     if (key === "Empty") {
@@ -185,7 +203,9 @@ export class BlueyeClient extends Emitter<Events> {
   }
 
   async getTelemetry<T extends Tel>(type: T): Promise<DecodedTelOutput<T>> {
-    const response = await this.sendRequest("GetTelemetryReq", { messageType: type });
+    const response = await this.sendRequest("GetTelemetryReq", {
+      messageType: type,
+    });
     const { payload } = telemetrySchema.parse(response);
     const { typeUrl, value } = payload;
 
@@ -193,7 +213,9 @@ export class BlueyeClient extends Emitter<Events> {
       throw new Error(`[rpc] unknown telemetry typeUrl: ${typeUrl}`);
     }
 
-    const result = (blueye.protocol[typeUrl] as Protocol[T]).decode(value) as DecodedTelOutput<T>;
+    const result = (blueye.protocol[typeUrl] as Protocol[T]).decode(
+      value,
+    ) as DecodedTelOutput<T>;
 
     this.logger.debug("[rpc] result:", result);
 
@@ -210,6 +232,9 @@ export class BlueyeClient extends Emitter<Events> {
     const encoded = protocol.encode(message as any).finish();
 
     this.logger.debug("[pub] sending control:", ctrl, message);
-    this.pub.send([Buffer.from(`blueye.protocol.${ctrl}`), Buffer.from(encoded)]);
+    this.pub.send([
+      Buffer.from(`blueye.protocol.${ctrl}`),
+      Buffer.from(encoded),
+    ]);
   }
 }
