@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@blueyerobotics/protocol-definitions':
-        specifier: 3.2.0-0f78a956
-        version: 3.2.0-0f78a956
+        specifier: 3.2.0-b032513b
+        version: 3.2.0-b032513b
       buffer:
         specifier: ^6.0.3
         version: 6.0.3
@@ -33,11 +33,11 @@ importers:
 
 packages:
 
-  '@blueyerobotics/protocol-definitions@3.2.0-0f78a956':
-    resolution: {integrity: sha512-ssqvlam7PoIKObjxKV4mn37wbBFJSlUnJXQk79uMROQ3WYeDyd0+SWpf76KABFTgnmLOLh6fWibDLNIOM7qD4Q==}
+  '@blueyerobotics/protocol-definitions@3.2.0-b032513b':
+    resolution: {integrity: sha512-mVBuPlKHaX699O5lEDeQbhIq8FLNtE/agOUVhOwqrH25e6gDXf7YOx14cAzgHO03ezXI0OV+4ZQtweRI/biWXg==}
 
-  '@bufbuild/protobuf@2.5.2':
-    resolution: {integrity: sha512-foZ7qr0IsUBjzWIq+SuBLfdQCpJ1j8cTuNNT4owngTHoN5KsJb8L9t65fzz7SCeSWzescoOil/0ldqiL041ABg==}
+  '@bufbuild/protobuf@2.6.3':
+    resolution: {integrity: sha512-w/gJKME9mYN7ZoUAmSMAWXk4hkVpxRKvEJCb3dV5g9wwWdxTJJ0ayOJAVcNxtdqaxDyFuC0uz4RSGVacJ030PQ==}
 
   assert@2.1.0:
     resolution: {integrity: sha512-eLHpSK/Y4nhMJ07gDaAzoX/XAKS8PSaojml3M0DM4JpV1LAi5JOJ/p6H/XWrl8L+DzVEvVCW1z3vWAaB9oTsQw==}
@@ -237,11 +237,11 @@ packages:
 
 snapshots:
 
-  '@blueyerobotics/protocol-definitions@3.2.0-0f78a956':
+  '@blueyerobotics/protocol-definitions@3.2.0-b032513b':
     dependencies:
-      '@bufbuild/protobuf': 2.5.2
+      '@bufbuild/protobuf': 2.6.3
 
-  '@bufbuild/protobuf@2.5.2': {}
+  '@bufbuild/protobuf@2.6.3': {}
 
   assert@2.1.0:
     dependencies:
