@@ -34,11 +34,11 @@ jobs:
         run: pnpm build
 
       - name: Publish to npm
-        run: npm publish --access public --tag latest
+        run: pnpm publish --access public --tag latest
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Check npm pack contents
         run: |
-          npm pack
+          pnpm pack
           tar -tzf *.tgz
