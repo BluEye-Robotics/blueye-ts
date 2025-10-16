@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@blueyerobotics/protocol-definitions':
-        specifier: 3.2.0-946df8e4
-        version: 3.2.0-946df8e4
+        specifier: 3.2.0-b1918def
+        version: 3.2.0-b1918def
       buffer:
         specifier: ^6.0.3
         version: 6.0.3
@@ -33,8 +33,8 @@ importers:
 
 packages:
 
-  '@blueyerobotics/protocol-definitions@3.2.0-946df8e4':
-    resolution: {integrity: sha512-UKIzavYdR+b5wqtxk4mJxEETPJvLmj5KhVYDOsyQ/aGOvn8nWGk5a5hSBQIlGsOsHlbOYLRYJG5r9WRI/wxYFQ==}
+  '@blueyerobotics/protocol-definitions@3.2.0-b1918def':
+    resolution: {integrity: sha512-eOoTzKQ0DBSzFa/z0QE72wFlRjzC5NwO0Wo3z+/GiXlVnu/uzf/m94UlJ3oWLo1Rm7NqfaXw6bchMuCvwdjSDQ==}
 
   '@bufbuild/protobuf@2.6.3':
     resolution: {integrity: sha512-w/gJKME9mYN7ZoUAmSMAWXk4hkVpxRKvEJCb3dV5g9wwWdxTJJ0ayOJAVcNxtdqaxDyFuC0uz4RSGVacJ030PQ==}
@@ -237,7 +237,7 @@ packages:
 
 snapshots:
 
-  '@blueyerobotics/protocol-definitions@3.2.0-946df8e4':
+  '@blueyerobotics/protocol-definitions@3.2.0-b1918def':
     dependencies:
       '@bufbuild/protobuf': 2.6.3
 
