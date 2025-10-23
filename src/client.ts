@@ -4,6 +4,7 @@ import { ConsolaInstance, createConsola, LogLevel, LogLevels } from "consola";
 import { Pub as ZMQPub, Req as ZMQRep, Sub as ZMQSub } from "jszmq";
 import { Emitter } from "strict-event-emitter";
 import z from "zod";
+import { AsyncQueue } from "./async-queue";
 import { responseSchema, telemetrySchema } from "./schema";
 
 const DEFAULT_SUB_URL = "ws://192.168.1.101:9985";
@@ -66,6 +67,7 @@ export class BlueyeClient extends Emitter<Events> {
   private sub: ZMQSub;
   private rpc: ZMQRep;
   private pub: ZMQPub;
+  private queue: AsyncQueue;
   private logger: ConsolaInstance;
 
   constructor({
@@ -79,16 +81,20 @@ export class BlueyeClient extends Emitter<Events> {
     super();
 
     this.timeout = timeout;
+
+    this.subUrl = subUrl;
+    this.rpcUrl = rpcUrl;
+    this.pubUrl = pubUrl;
+
+    this.sub = new ZMQSub();
+    this.rpc = new ZMQRep();
+    this.pub = new ZMQPub();
+
+    this.queue = new AsyncQueue();
     this.logger = createConsola({
       level: logLevel,
       formatOptions: { colors: true, compact: false },
     });
-    this.subUrl = subUrl;
-    this.rpcUrl = rpcUrl;
-    this.pubUrl = pubUrl;
-    this.sub = new ZMQSub();
-    this.rpc = new ZMQRep();
-    this.pub = new ZMQPub();
 
     // @ts-ignore
     this.sub.on("message", (topic, msg) => {
@@ -166,14 +172,8 @@ export class BlueyeClient extends Emitter<Events> {
     const message = protocol.create(opts);
     const encoded = protocol.encode(message as any).finish();
 
-    const { key, data } = await Promise.race([
-      new Promise<never>((_, reject) =>
-        setTimeout(
-          () => reject(new Error("[rpc] request timed out")),
-          this.timeout,
-        ),
-      ),
-      new Promise<z.infer<typeof responseSchema>>((resolve) => {
+    const request = () => {
+      return new Promise<z.infer<typeof responseSchema>>((resolve) => {
         // @ts-ignore
         this.rpc.once("message", (topic, msg) => {
           resolve({ key: topic.toString().split(".").at(-1), data: msg });
@@ -183,7 +183,17 @@ export class BlueyeClient extends Emitter<Events> {
           Buffer.from(`blueye.protocol.${req}`),
           Buffer.from(encoded),
         ]);
-      }),
+      });
+    };
+
+    const { key, data } = await Promise.race([
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error("[rpc] request timed out")),
+          this.timeout,
+        ),
+      ),
+      this.queue.enqueue(request),
     ]);
 
     if (key === "Empty") {
