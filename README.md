@@ -1,6 +1,6 @@
 # blueye-ts
 
-A TypeScript client for interacting with Blueye underwater drones.
+A TypeScript package for interacting with Blueye underwater drones and parsing binlog files.
 
 ## Installation
 
