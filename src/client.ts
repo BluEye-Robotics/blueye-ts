@@ -178,9 +178,15 @@ export class BlueyeClient extends Emitter<Events> {
     const encoded = protocol.encode(message as any).finish();
 
     const request = () => {
-      return new Promise<z.infer<typeof responseSchema>>((resolve) => {
+      return new Promise<z.infer<typeof responseSchema>>((resolve, reject) => {
+        const timer = setTimeout(
+          () => reject(new Error("[rpc] request timed out")),
+          this.timeout,
+        );
+
         // @ts-ignore
         this.rpc.once("message", (topic, msg) => {
+          clearTimeout(timer);
           resolve({ key: topic.toString().split(".").at(-1), data: msg });
         });
 
@@ -191,15 +197,7 @@ export class BlueyeClient extends Emitter<Events> {
       });
     };
 
-    const { key, data } = await Promise.race([
-      new Promise<never>((_, reject) =>
-        setTimeout(
-          () => reject(new Error("[rpc] request timed out")),
-          this.timeout,
-        ),
-      ),
-      this.queue.enqueue(request),
-    ]);
+    const { key, data } = await this.queue.enqueue(request);
 
     if (key === "Empty") {
       return null;
