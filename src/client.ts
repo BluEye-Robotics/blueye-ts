@@ -57,6 +57,7 @@ type Options = Partial<{
   rpcUrl: string;
   pubUrl: string;
   timeout: number;
+  reconnectInterval: number;
   logLevel: LogLevel;
   autoConnect: boolean;
 }>;
@@ -64,6 +65,7 @@ type Options = Partial<{
 export class BlueyeClient extends Emitter<Events> {
   public state: State = "disconnected";
   public timeout: number;
+  public reconnectInterval: number;
 
   private subUrl: string;
   private rpcUrl: string;
@@ -80,12 +82,14 @@ export class BlueyeClient extends Emitter<Events> {
     rpcUrl = DEFAULT_RPC_URL,
     pubUrl = DEFAULT_PUB_URL,
     timeout = 2000,
+    reconnectInterval = 2000,
     logLevel = LogLevels.info,
     autoConnect = false,
   }: Options = {}) {
     super();
 
     this.timeout = timeout;
+    this.reconnectInterval = reconnectInterval;
 
     this.subUrl = subUrl;
     this.rpcUrl = rpcUrl;
@@ -138,6 +142,10 @@ export class BlueyeClient extends Emitter<Events> {
       this.logger.warn("[client] already connecting");
       return;
     }
+
+    this.sub.options.reconnectInterval = this.reconnectInterval;
+    this.rpc.options.reconnectInterval = this.reconnectInterval;
+    this.pub.options.reconnectInterval = this.reconnectInterval;
 
     this.updateState("connecting");
     this.sub.subscribe("");
