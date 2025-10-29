@@ -1,9 +1,14 @@
 import { blueye } from "@blueyerobotics/protocol-definitions";
 import { Buffer } from "buffer";
-import { ConsolaInstance, createConsola, LogLevel, LogLevels } from "consola";
+import {
+  type ConsolaInstance,
+  createConsola,
+  type LogLevel,
+  LogLevels,
+} from "consola";
 import { Pub as ZMQPub, Req as ZMQRep, Sub as ZMQSub } from "jszmq";
 import { Emitter } from "strict-event-emitter";
-import z from "zod";
+import type z from "zod";
 import { AsyncQueue } from "./async-queue";
 import { responseSchema, telemetrySchema } from "./schema";
 
