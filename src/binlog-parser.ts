@@ -90,7 +90,8 @@ export const parseMessages = (decompressed: Uint8Array, fixTimes = true) => {
       new Uint8Array(msgBytes),
       length,
     );
-    const key = msg.payload!.typeUrl.split(".").at(-1) as
+
+    const key = msg.payload?.typeUrl.split(".").at(-1) as
       | ProtocolKey
       | undefined;
 
@@ -99,7 +100,12 @@ export const parseMessages = (decompressed: Uint8Array, fixTimes = true) => {
       continue;
     }
 
-    const data = blueye.protocol[key].decode(msg.payload!.value);
+    if (msg.payload == null) {
+      console.warn(`Missing payload for key: ${key}`);
+      continue;
+    }
+
+    const data = blueye.protocol[key].decode(msg.payload.value);
     let innerData: object | undefined;
 
     if (key === "GetTelemetryRep") {
@@ -113,7 +119,9 @@ export const parseMessages = (decompressed: Uint8Array, fixTimes = true) => {
         continue;
       }
 
-      innerData = blueye.protocol[innerKey].decode(telRep.payload!.value);
+      innerData = telRep.payload
+        ? blueye.protocol[innerKey].decode(telRep.payload.value)
+        : undefined;
     }
 
     let type: ProtocolType = "Tel";
@@ -122,15 +130,14 @@ export const parseMessages = (decompressed: Uint8Array, fixTimes = true) => {
     else if (key.endsWith("Rep")) type = "Rep";
     else if (key.endsWith("Req")) type = "Req";
 
-    // @ts-expect-error 2345
     messages.push({
-      monotonicTime: msg.clockMonotonic!.getTime(),
-      time: msg.unixTimestamp!.getTime(),
+      monotonicTime: msg.clockMonotonic?.getTime() ?? 0,
+      time: msg.unixTimestamp?.getTime() ?? 0,
       type,
       key,
       data,
       innerData,
-    });
+    } as Message);
   }
 
   if (fixTimes) {
@@ -148,7 +155,9 @@ export const parseMessages = (decompressed: Uint8Array, fixTimes = true) => {
 export const fixMessageTimes = (messages: Message[]) => {
   if (messages.length === 0) return messages;
 
-  const last = messages.at(-1)!;
+  const last = messages.at(-1);
+  if (!last) return messages;
+
   const ssbLast = last.monotonicTime;
   const unixLast = last.time;
 
