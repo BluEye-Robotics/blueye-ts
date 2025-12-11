@@ -19,7 +19,7 @@
   "author": "Blueye <contact@blueye.no> (https://blueye.no/)",
   "license": "LGPL-3.0-only",
   "dependencies": {
-    "@blueyerobotics/protocol-definitions": "3.2.0-b1918def",
+    "@blueyerobotics/protocol-definitions": "3.2.0-b41129de",
     "@bufbuild/protobuf": "^2.10.0",
     "buffer": "^6.0.3",
     "consola": "^3.4.2",

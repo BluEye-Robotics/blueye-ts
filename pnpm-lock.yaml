@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@blueyerobotics/protocol-definitions':
-        specifier: 3.2.0-b1918def
-        version: 3.2.0-b1918def
+        specifier: 3.2.0-b41129de
+        version: 3.2.0-b41129de
       '@bufbuild/protobuf':
         specifier: ^2.10.0
         version: 2.10.0
@@ -95,8 +95,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@blueyerobotics/protocol-definitions@3.2.0-b1918def':
-    resolution: {integrity: sha512-eOoTzKQ0DBSzFa/z0QE72wFlRjzC5NwO0Wo3z+/GiXlVnu/uzf/m94UlJ3oWLo1Rm7NqfaXw6bchMuCvwdjSDQ==}
+  '@blueyerobotics/protocol-definitions@3.2.0-b41129de':
+    resolution: {integrity: sha512-sKd1AuSn9JhEP/4Pwgqk1x0cqMD51MGUDMIZDlq+qxX6N65bkD4JAia46tZEiZlwz+P+6+jvGH5alR3b0dmkZw==}
 
   '@bufbuild/protobuf@2.10.0':
     resolution: {integrity: sha512-fdRs9PSrBF7QUntpZpq6BTw58fhgGJojgg39m9oFOJGZT+nip9b0so5cYY1oWl5pvemDLr0cPPsH46vwThEbpQ==}
@@ -337,7 +337,7 @@ snapshots:
   '@biomejs/cli-win32-x64@2.3.2':
     optional: true
 
-  '@blueyerobotics/protocol-definitions@3.2.0-b1918def':
+  '@blueyerobotics/protocol-definitions@3.2.0-b41129de':
     dependencies:
       '@bufbuild/protobuf': 2.10.0
 
