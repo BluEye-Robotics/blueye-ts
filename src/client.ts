@@ -105,7 +105,6 @@ export class BlueyeClient extends Emitter<Events> {
       formatOptions: { colors: true, compact: false },
     });
 
-    // @ts-ignore
     this.sub.on("message", (topic, msg) => {
       const { key, data } = responseSchema.parse({ key: topic, data: msg });
 
@@ -192,7 +191,6 @@ export class BlueyeClient extends Emitter<Events> {
           this.timeout,
         );
 
-        // @ts-ignore
         this.rpc.once("message", (topic, msg) => {
           clearTimeout(timer);
           resolve({ key: topic.toString().split(".").at(-1), data: msg });

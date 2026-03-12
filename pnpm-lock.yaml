@@ -36,6 +36,9 @@ importers:
       '@biomejs/biome':
         specifier: 2.3.14
         version: 2.3.14
+      '@types/node':
+        specifier: ^25.4.0
+        version: 25.4.0
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -100,6 +103,9 @@ packages:
 
   '@bufbuild/protobuf@2.11.0':
     resolution: {integrity: sha512-sBXGT13cpmPR5BMgHE6UEEfEaShh5Ror6rfN3yEK5si7QVrtZg8LEPQb0VVhiLRUslD2yLnXtnRzG035J/mZXQ==}
+
+  '@types/node@25.4.0':
+    resolution: {integrity: sha512-9wLpoeWuBlcbBpOY3XmzSTG3oscB6xjBEEtn+pYXTfhyXhIxC5FsBer2KTopBlvKEiW9l13po9fq+SJY/5lkhw==}
 
   assert@2.1.0:
     resolution: {integrity: sha512-eLHpSK/Y4nhMJ07gDaAzoX/XAKS8PSaojml3M0DM4JpV1LAi5JOJ/p6H/XWrl8L+DzVEvVCW1z3vWAaB9oTsQw==}
@@ -278,6 +284,9 @@ packages:
     engines: {node: '>=14.17'}
     hasBin: true
 
+  undici-types@7.18.2:
+    resolution: {integrity: sha512-AsuCzffGHJybSaRrmr5eHr81mwJU3kjw6M+uprWvCXiNeN9SOGwQ3Jn8jb8m3Z6izVgknn1R0FTCEAP2QrLY/w==}
+
   util@0.12.5:
     resolution: {integrity: sha512-kZf/K6hEIrWHI6XqOFUiiMa+79wE/D8Q+NCNAWclkyg3b4d2k7s0QGepNjiABc+aR3N1PAyHL7p6UcLY6LmrnA==}
 
@@ -342,6 +351,10 @@ snapshots:
       '@bufbuild/protobuf': 2.11.0
 
   '@bufbuild/protobuf@2.11.0': {}
+
+  '@types/node@25.4.0':
+    dependencies:
+      undici-types: 7.18.2
 
   assert@2.1.0:
     dependencies:
@@ -549,6 +562,8 @@ snapshots:
   strict-event-emitter@0.5.1: {}
 
   typescript@5.9.3: {}
+
+  undici-types@7.18.2: {}
 
   util@0.12.5:
     dependencies:
