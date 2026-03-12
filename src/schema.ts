@@ -1,11 +1,10 @@
-import { Buffer } from "buffer";
 import z from "zod";
 
 export const responseSchema = z.object({
   key: z
-    .instanceof(Buffer)
+    .instanceof(Uint8Array)
     .transform((val) => val.toString().split(".").at(-1)!),
-  data: z.instanceof(Buffer),
+  data: z.instanceof(Uint8Array),
 });
 
 export const telemetrySchema = z.object({
