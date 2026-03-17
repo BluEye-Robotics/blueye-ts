@@ -152,6 +152,27 @@ export const parseMessages = (decompressed: Uint8Array, fixTimes = true) => {
  * @param messages The messages to fix the times for.
  * @returns The messages with corrected times.
  */
+/**
+ * Parse a single varint-prefixed BinlogRecord from raw (uncompressed) bytes.
+ * Used for streaming playback where individual frames are fetched via HTTP Range requests.
+ * @param bytes Raw bytes containing a single varint-length-prefixed BinlogRecord.
+ * @returns The parsed message, or null if the record is not a known protocol type.
+ */
+export const parseFrame = (bytes: Uint8Array): Message | null => {
+  const messages = parseFrames(bytes);
+  return messages.length > 0 ? messages[0] : null;
+};
+
+/**
+ * Parse multiple contiguous varint-prefixed BinlogRecords from raw (uncompressed) bytes.
+ * Used for streaming playback where frame batches are fetched via HTTP Range requests.
+ * @param bytes Raw bytes containing one or more varint-length-prefixed BinlogRecords.
+ * @returns An array of parsed messages.
+ */
+export const parseFrames = (bytes: Uint8Array): Message[] => {
+  return parseMessages(bytes, false);
+};
+
 export const fixMessageTimes = (messages: Message[]) => {
   if (messages.length === 0) return messages;
 
