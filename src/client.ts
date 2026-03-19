@@ -10,11 +10,16 @@ import { Pub as ZMQPub, Req as ZMQRep, Sub as ZMQSub } from "jszmq";
 import { Emitter } from "strict-event-emitter";
 import type z from "zod";
 import { AsyncQueue } from "./async-queue";
+import {
+  getConnectedMultibeam as getConnectedMultibeamFromDroneInfo,
+  type ConnectedMultibeam,
+} from "./devices";
 import { responseSchema, telemetrySchema } from "./schema";
 
 const DEFAULT_SUB_URL = "ws://192.168.1.101:9985";
 const DEFAULT_RPC_URL = "ws://192.168.1.101:9986";
 const DEFAULT_PUB_URL = "ws://192.168.1.101:9987";
+const DEFAULT_SONAR_URL = "ws://192.168.1.101:9988";
 
 export type Protocol = typeof blueye.protocol;
 export type ProtocolType = "Req" | "Rep" | "Tel" | "Ctrl";
@@ -38,10 +43,28 @@ export type CreateArgs<T extends Req | Ctrl> = Parameters<
 export type DecodedOutput<T extends Req> = ReturnType<ReqToRep<T>["decode"]>;
 export type DecodedTelOutput<T extends Tel> = ReturnType<Protocol[T]["decode"]>;
 
-type State = "connecting" | "connected" | "disconnected";
+type State = "connecting" | "reconnecting" | "connected" | "disconnected";
+type SocketName = "sub" | "rpc" | "pub";
+type ConnectionLifecycleSocket = {
+  on(event: "ready" | "lost", listener: () => void): unknown;
+};
+type SonarStateEvent =
+  | "sonarConnecting"
+  | "sonarReconnecting"
+  | "sonarConnected"
+  | "sonarDisconnected";
+
+const SONAR_STATE_EVENTS: Record<State, SonarStateEvent> = {
+  connecting: "sonarConnecting",
+  reconnecting: "sonarReconnecting",
+  connected: "sonarConnected",
+  disconnected: "sonarDisconnected",
+};
 
 export type Events = {
   [K in State]: [];
+} & {
+  [K in SonarStateEvent]: [];
 } & {
   [K in Tel]: [DecodedTelOutput<K>];
 };
@@ -56,35 +79,54 @@ type Options = Partial<{
   subUrl: string;
   rpcUrl: string;
   pubUrl: string;
+  sonarUrl: string;
   timeout: number;
   reconnectInterval: number;
   logLevel: LogLevel;
   autoConnect: boolean;
+  autoConnectSonar: boolean;
 }>;
 
 export class BlueyeClient extends Emitter<Events> {
   public state: State = "disconnected";
+  public sonarState: State = "disconnected";
   public timeout: number;
   public reconnectInterval: number;
+  public connectedMultibeam: ConnectedMultibeam | null = null;
 
   private subUrl: string;
   private rpcUrl: string;
   private pubUrl: string;
+  private sonarUrl: string;
 
   private sub: ZMQSub;
   private rpc: ZMQRep;
   private pub: ZMQPub;
+  private sonarSub: ZMQSub;
   private queue: AsyncQueue;
   private logger: ConsolaInstance;
+  private shouldBeConnected = false;
+  private hasConnected = false;
+  private shouldBeSonarConnected = false;
+  private hasSonarConnected = false;
+  private autoConnectSonar: boolean;
+  private socketReady: Record<SocketName, boolean> = {
+    sub: false,
+    rpc: false,
+    pub: false,
+  };
+  private sonarReady = false;
 
   constructor({
     subUrl = DEFAULT_SUB_URL,
     rpcUrl = DEFAULT_RPC_URL,
     pubUrl = DEFAULT_PUB_URL,
+    sonarUrl = DEFAULT_SONAR_URL,
     timeout = 2000,
     reconnectInterval = 2000,
     logLevel = LogLevels.info,
     autoConnect = false,
+    autoConnectSonar = true,
   }: Options = {}) {
     super();
 
@@ -94,10 +136,13 @@ export class BlueyeClient extends Emitter<Events> {
     this.subUrl = subUrl;
     this.rpcUrl = rpcUrl;
     this.pubUrl = pubUrl;
+    this.sonarUrl = sonarUrl;
+    this.autoConnectSonar = autoConnectSonar;
 
     this.sub = new ZMQSub();
     this.rpc = new ZMQRep();
     this.pub = new ZMQPub();
+    this.sonarSub = new ZMQSub();
 
     this.queue = new AsyncQueue();
     this.logger = createConsola({
@@ -105,19 +150,27 @@ export class BlueyeClient extends Emitter<Events> {
       formatOptions: { colors: true, compact: false },
     });
 
-    this.sub.on("message", (topic, msg) => {
-      const { key, data } = responseSchema.parse({ key: topic, data: msg });
+    this.bindSocketLifecycle("sub", this.sub);
+    this.bindSocketLifecycle("rpc", this.rpc);
+    this.bindSocketLifecycle("pub", this.pub);
+    this.bindSonarLifecycle(this.sonarSub);
 
-      if (!isInProtocol(key) || !key.endsWith("Tel")) {
-        this.logger.warn("[sub] unknown protocol:", key);
+    this.sub.on("message", (topic, msg) => {
+      this.handleTelemetryMessage("sub", topic, msg);
+    });
+
+    this.sonarSub.on("message", (topic, msg) => {
+      this.handleTelemetryMessage("sonar-sub", topic, msg);
+    });
+
+    this.on("connected", () => {
+      if (!this.autoConnectSonar) {
         return;
       }
 
-      const protocol = blueye.protocol[key as Tel];
-      const message = protocol.decode(data);
-
-      this.logger.verbose("[sub] message:", key, message);
-      this.emit(key as Tel, message as any);
+      void this.refreshSonarConnection().catch((error) => {
+        this.logger.warn("[sonar] failed to refresh sonar status:", error);
+      });
     });
 
     if (autoConnect) {
@@ -126,9 +179,192 @@ export class BlueyeClient extends Emitter<Events> {
   }
 
   private updateState(newState: State) {
+    if (this.state === newState) {
+      return;
+    }
+
     this.state = newState;
     this.logger.info(`[client] ${newState}`);
     this.emit(newState);
+  }
+
+  private updateSonarState(newState: State) {
+    if (this.sonarState === newState) {
+      return;
+    }
+
+    this.sonarState = newState;
+    this.logger.info(`[sonar-client] ${newState}`);
+    this.emit(SONAR_STATE_EVENTS[newState]);
+  }
+
+  private handleTelemetryMessage(
+    socketName: "sub" | "sonar-sub",
+    topic: Buffer,
+    msg: Uint8Array,
+  ) {
+    const { key, data } = responseSchema.parse({ key: topic, data: msg });
+
+    if (!isInProtocol(key) || !key.endsWith("Tel")) {
+      this.logger.warn(`[${socketName}] unknown protocol:`, key);
+      return;
+    }
+
+    const protocol = blueye.protocol[key as Tel];
+    const message = protocol.decode(data) as DecodedTelOutput<Tel>;
+
+    if (socketName === "sub" && key === "DroneInfoTel") {
+      this.setConnectedMultibeam(message as DecodedTelOutput<"DroneInfoTel">);
+    }
+
+    this.logger.verbose(`[${socketName}] message:`, key, message);
+    this.emit(key as Tel, message as never);
+  }
+
+  private bindSocketLifecycle(
+    name: SocketName,
+    socket: ConnectionLifecycleSocket,
+  ) {
+    socket.on("ready", () => {
+      this.setSocketReady(name, true);
+    });
+
+    socket.on("lost", () => {
+      this.setSocketReady(name, false);
+    });
+  }
+
+  private bindSonarLifecycle(socket: ConnectionLifecycleSocket) {
+    socket.on("ready", () => {
+      this.setSonarReady(true);
+    });
+
+    socket.on("lost", () => {
+      this.setSonarReady(false);
+    });
+  }
+
+  private setSocketReady(name: SocketName, ready: boolean) {
+    if (this.socketReady[name] === ready) {
+      return;
+    }
+
+    const wasConnected = this.allSocketsReady();
+    this.socketReady[name] = ready;
+    this.logger.debug(`[client] ${name} socket ${ready ? "ready" : "lost"}`);
+
+    if (!this.shouldBeConnected) {
+      return;
+    }
+
+    if (this.allSocketsReady()) {
+      this.hasConnected = true;
+      this.updateState("connected");
+      return;
+    }
+
+    if (wasConnected && !ready && this.hasConnected) {
+      this.updateState("reconnecting");
+      return;
+    }
+
+    this.updateState(this.hasConnected ? "reconnecting" : "connecting");
+  }
+
+  private resetSocketReadiness() {
+    this.socketReady.sub = false;
+    this.socketReady.rpc = false;
+    this.socketReady.pub = false;
+  }
+
+  private allSocketsReady() {
+    return this.socketReady.sub && this.socketReady.rpc && this.socketReady.pub;
+  }
+
+  private setConnectedMultibeam(droneInfo: DecodedTelOutput<"DroneInfoTel"> | null) {
+    this.connectedMultibeam = getConnectedMultibeamFromDroneInfo(droneInfo);
+    this.syncSonarConnection();
+    return this.connectedMultibeam;
+  }
+
+  private setSonarReady(ready: boolean) {
+    if (this.sonarReady === ready) {
+      return;
+    }
+
+    const wasConnected = this.sonarReady;
+    this.sonarReady = ready;
+    this.logger.debug(`[sonar-client] socket ${ready ? "ready" : "lost"}`);
+
+    if (!this.shouldBeSonarConnected) {
+      return;
+    }
+
+    if (this.sonarReady) {
+      this.hasSonarConnected = true;
+      this.updateSonarState("connected");
+      return;
+    }
+
+    if (wasConnected && this.hasSonarConnected) {
+      this.updateSonarState("reconnecting");
+      return;
+    }
+
+    this.updateSonarState(this.hasSonarConnected ? "reconnecting" : "connecting");
+  }
+
+  private syncSonarConnection() {
+    if (
+      this.state !== "connected" ||
+      !this.autoConnectSonar ||
+      this.connectedMultibeam == null
+    ) {
+      this.disconnectSonar();
+      return;
+    }
+
+    this.connectSonar();
+  }
+
+  private connectSonar() {
+    if (this.sonarState === "connected") {
+      return;
+    }
+
+    if (this.sonarState === "connecting" || this.sonarState === "reconnecting") {
+      return;
+    }
+
+    this.shouldBeSonarConnected = true;
+    this.sonarReady = false;
+    this.hasSonarConnected = false;
+    this.sonarSub.options.reconnectInterval = this.reconnectInterval;
+    this.updateSonarState("connecting");
+    this.sonarSub.subscribe("");
+    this.sonarSub.connect(this.sonarUrl);
+  }
+
+  private disconnectSonar() {
+    this.shouldBeSonarConnected = false;
+    this.sonarReady = false;
+    this.hasSonarConnected = false;
+
+    if (this.sonarState === "disconnected") {
+      return;
+    }
+
+    this.sonarSub.unsubscribe("");
+    this.sonarSub.disconnect(this.sonarUrl);
+    this.updateSonarState("disconnected");
+  }
+
+  private ensureConnected(operation: "request" | "control") {
+    if (this.state !== "connected") {
+      throw new Error(
+        `[client] cannot send ${operation} while ${this.state}; call connect() and wait for "connected"`,
+      );
+    }
   }
 
   connect() {
@@ -137,8 +373,8 @@ export class BlueyeClient extends Emitter<Events> {
       return;
     }
 
-    if (this.state === "connecting") {
-      this.logger.warn("[client] already connecting");
+    if (this.state === "connecting" || this.state === "reconnecting") {
+      this.logger.warn(`[client] already ${this.state}`);
       return;
     }
 
@@ -146,12 +382,14 @@ export class BlueyeClient extends Emitter<Events> {
     this.rpc.options.reconnectInterval = this.reconnectInterval;
     this.pub.options.reconnectInterval = this.reconnectInterval;
 
+    this.shouldBeConnected = true;
+    this.resetSocketReadiness();
+    this.hasConnected = false;
     this.updateState("connecting");
     this.sub.subscribe("");
     this.sub.connect(this.subUrl);
     this.rpc.connect(this.rpcUrl);
     this.pub.connect(this.pubUrl);
-    this.updateState("connected");
   }
 
   disconnect() {
@@ -160,15 +398,15 @@ export class BlueyeClient extends Emitter<Events> {
       return;
     }
 
-    if (this.state === "connecting") {
-      this.logger.warn("[client] cannot disconnect while connecting");
-      return;
-    }
-
+    this.shouldBeConnected = false;
+    this.hasConnected = false;
+    this.connectedMultibeam = null;
+    this.disconnectSonar();
     this.sub.unsubscribe("");
     this.sub.disconnect(this.subUrl);
     this.rpc.disconnect(this.rpcUrl);
     this.pub.disconnect(this.pubUrl);
+    this.resetSocketReadiness();
     this.updateState("disconnected");
   }
 
@@ -176,6 +414,8 @@ export class BlueyeClient extends Emitter<Events> {
     req: T,
     opts: CreateArgs<T> = {},
   ): Promise<DecodedOutput<T> | null> {
+    this.ensureConnected("request");
+
     if (!isInProtocol(req) || !req.endsWith("Req")) {
       throw new Error(`[rpc] unknown protocol: ${req}`);
     }
@@ -241,7 +481,17 @@ export class BlueyeClient extends Emitter<Events> {
     return result;
   }
 
+  async getConnectedMultibeam(): Promise<ConnectedMultibeam | null> {
+    return this.setConnectedMultibeam(await this.getTelemetry("DroneInfoTel"));
+  }
+
+  async refreshSonarConnection(): Promise<ConnectedMultibeam | null> {
+    return this.getConnectedMultibeam();
+  }
+
   async sendControl<T extends Ctrl>(ctrl: T, opts: CreateArgs<T> = {}) {
+    this.ensureConnected("control");
+
     if (!isInProtocol(ctrl) || !ctrl.endsWith("Ctrl")) {
       throw new Error(`[pub] unknown protocol: ${ctrl}`);
     }

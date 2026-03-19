@@ -4,16 +4,26 @@ const main = async () => {
   const client = new BlueyeClient();
 
   client.on("connected", async () => {
-    // request battery information
-    const batteryRep = await client.sendRequest("GetBatteryReq");
-    console.log("batteryRep:", batteryRep);
+    try {
+      // request battery information
+      const batteryRep = await client.sendRequest("GetBatteryReq");
+      console.log("batteryRep:", batteryRep);
 
-    // get latest battery telemetry
-    const batteryTel = await client.getTelemetry("BatteryTel");
-    console.log("batteryTel:", batteryTel);
+      // get latest battery telemetry
+      const batteryTel = await client.getTelemetry("BatteryTel");
+      console.log("batteryTel:", batteryTel);
 
-    // send a control message to change the light intensity to 1
-    await client.sendControl("LightsCtrl", { lights: { value: 1 } });
+      // send a control message to change the light intensity to 0.1
+      console.log("setting light intensity to 0.1 for 1 second...");
+      await client.sendControl("LightsCtrl", { lights: { value: 0.1 } });
+
+      setTimeout(async () => {
+        console.log("setting light intensity back to 0...");
+        await client.sendControl("LightsCtrl", { lights: { value: 0 } });
+      }, 1000);
+    } catch (error) {
+      console.error("Error:", error);
+    }
   });
 
   // subscribe to battery telemetry updates

@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  jszmq@0.1.2:
+    hash: a0b97e6f32e7e51cd58467edee78025160adc865f49720678e99c3c7803d3281
+    path: patches/jszmq@0.1.2.patch
+
 importers:
 
   .:
@@ -25,7 +30,7 @@ importers:
         version: 0.8.2
       jszmq:
         specifier: ^0.1.2
-        version: 0.1.2
+        version: 0.1.2(patch_hash=a0b97e6f32e7e51cd58467edee78025160adc865f49720678e99c3c7803d3281)
       strict-event-emitter:
         specifier: ^0.5.1
         version: 0.5.1
@@ -507,7 +512,7 @@ snapshots:
     dependencies:
       ws: 7.5.10
 
-  jszmq@0.1.2:
+  jszmq@0.1.2(patch_hash=a0b97e6f32e7e51cd58467edee78025160adc865f49720678e99c3c7803d3281):
     dependencies:
       assert: 2.1.0
       buffer: 5.7.1

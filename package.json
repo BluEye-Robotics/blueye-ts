@@ -12,8 +12,11 @@
     "dist"
   ],
   "scripts": {
-    "start": "node dist/example.js",
-    "build": "tsc"
+    "start": "pnpm build && node dist/example.js",
+    "start:sonar": "pnpm build && node dist/sonar-example.js",
+    "build": "tsc",
+    "test": "pnpm build && node --test --test-concurrency=1 test/**/*.test.js",
+    "test:one": "node --test --test-concurrency=1"
   },
   "keywords": [],
   "author": "Blueye <contact@blueye.no> (https://blueye.no/)",
