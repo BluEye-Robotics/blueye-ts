@@ -6,7 +6,7 @@ const { setTimeout: delay } = require("node:timers/promises");
 
 const { blueye } = require("@blueyerobotics/protocol-definitions");
 const { BlueyeClient } = require("../dist/index.js");
-const jsmq = require("jszmq");
+const jsmq = require("@blueyerobotics/jszmq");
 
 const BATTERY = {
   level: 85,

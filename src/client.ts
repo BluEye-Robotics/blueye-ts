@@ -6,7 +6,11 @@ import {
   type LogLevel,
   LogLevels,
 } from "consola";
-import { Pub as ZMQPub, Req as ZMQRep, Sub as ZMQSub } from "jszmq";
+import {
+  Pub as ZMQPub,
+  Req as ZMQRep,
+  Sub as ZMQSub,
+} from "@blueyerobotics/jszmq";
 import { Emitter } from "strict-event-emitter";
 import type z from "zod";
 import { AsyncQueue } from "./async-queue";
