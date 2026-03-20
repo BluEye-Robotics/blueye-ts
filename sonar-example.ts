@@ -11,10 +11,6 @@ const main = async () => {
     }
   });
 
-  client.on("reconnecting", () => {
-    console.log("client reconnecting...");
-  });
-
   client.on("disconnected", () => {
     console.log("client disconnected");
   });
@@ -25,10 +21,6 @@ const main = async () => {
 
   client.on("sonarConnected", () => {
     console.log("sonar connected");
-  });
-
-  client.on("sonarReconnecting", () => {
-    console.log("sonar reconnecting...");
   });
 
   client.on("sonarDisconnected", () => {

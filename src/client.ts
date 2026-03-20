@@ -39,20 +39,18 @@ export type CreateArgs<T extends Req | Ctrl> = Parameters<
 export type DecodedOutput<T extends Req> = ReturnType<ReqToRep<T>["decode"]>;
 export type DecodedTelOutput<T extends Tel> = ReturnType<Protocol[T]["decode"]>;
 
-type State = "connecting" | "reconnecting" | "connected" | "disconnected";
+type State = "connecting" | "connected" | "disconnected";
 type SocketName = "sub" | "rpc" | "pub";
 type ConnectionLifecycleSocket = {
   on(event: "ready" | "lost", listener: () => void): unknown;
 };
 type SonarStateEvent =
   | "sonarConnecting"
-  | "sonarReconnecting"
   | "sonarConnected"
   | "sonarDisconnected";
 
 const SONAR_STATE_EVENTS: Record<State, SonarStateEvent> = {
   connecting: "sonarConnecting",
-  reconnecting: "sonarReconnecting",
   connected: "sonarConnected",
   disconnected: "sonarDisconnected",
 };
@@ -101,9 +99,7 @@ export class BlueyeClient extends Emitter<Events> {
   private queue: AsyncQueue;
   private logger: ConsolaInstance;
   private shouldBeConnected = false;
-  private hasConnected = false;
   private shouldBeSonarConnected = false;
-  private hasSonarConnected = false;
   private autoConnectSonar: boolean;
   private socketReady: Record<SocketName, boolean> = {
     sub: false,
@@ -230,7 +226,6 @@ export class BlueyeClient extends Emitter<Events> {
       return;
     }
 
-    const wasConnected = this.allSocketsReady();
     this.socketReady[name] = ready;
     this.logger.debug(`[client] ${name} socket ${ready ? "ready" : "lost"}`);
 
@@ -239,17 +234,11 @@ export class BlueyeClient extends Emitter<Events> {
     }
 
     if (this.allSocketsReady()) {
-      this.hasConnected = true;
       this.updateState("connected");
       return;
     }
 
-    if (wasConnected && !ready && this.hasConnected) {
-      this.updateState("reconnecting");
-      return;
-    }
-
-    this.updateState(this.hasConnected ? "reconnecting" : "connecting");
+    this.updateState("connecting");
   }
 
   private resetSocketReadiness() {
@@ -267,7 +256,6 @@ export class BlueyeClient extends Emitter<Events> {
       return;
     }
 
-    const wasConnected = this.sonarReady;
     this.sonarReady = ready;
     this.logger.debug(`[sonar-client] socket ${ready ? "ready" : "lost"}`);
 
@@ -276,17 +264,11 @@ export class BlueyeClient extends Emitter<Events> {
     }
 
     if (this.sonarReady) {
-      this.hasSonarConnected = true;
       this.updateSonarState("connected");
       return;
     }
 
-    if (wasConnected && this.hasSonarConnected) {
-      this.updateSonarState("reconnecting");
-      return;
-    }
-
-    this.updateSonarState(this.hasSonarConnected ? "reconnecting" : "connecting");
+    this.updateSonarState("connecting");
   }
 
   connectSonar() {
@@ -294,13 +276,12 @@ export class BlueyeClient extends Emitter<Events> {
       return;
     }
 
-    if (this.sonarState === "connecting" || this.sonarState === "reconnecting") {
+    if (this.sonarState === "connecting") {
       return;
     }
 
     this.shouldBeSonarConnected = true;
     this.sonarReady = false;
-    this.hasSonarConnected = false;
     this.sonarSub.options.reconnectInterval = this.reconnectInterval;
     this.updateSonarState("connecting");
     this.sonarSub.subscribe("");
@@ -310,7 +291,6 @@ export class BlueyeClient extends Emitter<Events> {
   disconnectSonar() {
     this.shouldBeSonarConnected = false;
     this.sonarReady = false;
-    this.hasSonarConnected = false;
 
     if (this.sonarState === "disconnected") {
       return;
@@ -335,7 +315,7 @@ export class BlueyeClient extends Emitter<Events> {
       return;
     }
 
-    if (this.state === "connecting" || this.state === "reconnecting") {
+    if (this.state === "connecting") {
       this.logger.warn(`[client] already ${this.state}`);
       return;
     }
@@ -346,7 +326,6 @@ export class BlueyeClient extends Emitter<Events> {
 
     this.shouldBeConnected = true;
     this.resetSocketReadiness();
-    this.hasConnected = false;
     this.updateState("connecting");
     this.sub.subscribe("");
     this.sub.connect(this.subUrl);
@@ -365,7 +344,6 @@ export class BlueyeClient extends Emitter<Events> {
     }
 
     this.shouldBeConnected = false;
-    this.hasConnected = false;
     this.disconnectSonar();
     this.sub.unsubscribe("");
     this.sub.disconnect(this.subUrl);

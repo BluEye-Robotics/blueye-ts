@@ -287,7 +287,7 @@ test("BlueyeClient stays connecting without a server and allows manual disconnec
   assert.equal(client.state, "disconnected");
 });
 
-test("BlueyeClient enters reconnecting and reconnects after the server returns", async () => {
+test("BlueyeClient returns to connecting and reconnects after the server returns", async () => {
   const urls = await createUrls();
   let harness = await createHarness(urls);
   const client = new BlueyeClient({
@@ -302,8 +302,8 @@ test("BlueyeClient enters reconnecting and reconnects after the server returns",
     await waitForEvent(client, "connected");
 
     harness.close();
-    await waitForEvent(client, "reconnecting", 3_000);
-    assert.equal(client.state, "reconnecting");
+    await waitForEvent(client, "connecting", 3_000);
+    assert.equal(client.state, "connecting");
 
     harness = await createHarness(urls);
     await waitForEvent(client, "connected", 3_000);
@@ -316,7 +316,7 @@ test("BlueyeClient enters reconnecting and reconnects after the server returns",
   }
 });
 
-test("BlueyeClient stays reconnecting during repeated failures and stops after manual disconnect", async () => {
+test("BlueyeClient stays connecting during repeated failures and stops after manual disconnect", async () => {
   const urls = await createUrls();
   let harness = await createHarness(urls);
   const client = new BlueyeClient({
@@ -331,19 +331,19 @@ test("BlueyeClient stays reconnecting during repeated failures and stops after m
     await waitForEvent(client, "connected");
 
     harness.close();
-    await waitForEvent(client, "reconnecting", 3_000);
+    await waitForEvent(client, "connecting", 3_000);
     await delay(200);
 
-    assert.equal(client.state, "reconnecting");
+    assert.equal(client.state, "connecting");
 
     await assert.rejects(
       () => client.sendRequest("GetBatteryReq"),
-      /cannot send request while reconnecting/,
+      /cannot send request while connecting/,
     );
 
     await assert.rejects(
       () => client.sendControl("LightsCtrl", { lights: { value: 1 } }),
-      /cannot send control while reconnecting/,
+      /cannot send control while connecting/,
     );
 
     client.disconnect();

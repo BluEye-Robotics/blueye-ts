@@ -12,18 +12,18 @@ const main = async () => {
       // get latest battery telemetry
       const batteryTel = await client.getTelemetry("BatteryTel");
       console.log("batteryTel:", batteryTel);
-
-      // send a control message to change the light intensity to 0.1
-      console.log("setting light intensity to 0.1 for 1 second...");
-      await client.sendControl("LightsCtrl", { lights: { value: 0.1 } });
-
-      setTimeout(async () => {
-        console.log("setting light intensity back to 0...");
-        await client.sendControl("LightsCtrl", { lights: { value: 0 } });
-      }, 1000);
     } catch (error) {
       // console.error("Error:", error);
     }
+
+    // send a control message to change the light intensity to 0.1
+    console.log("setting light intensity to 0.1 for 1 second...");
+    await client.sendControl("LightsCtrl", { lights: { value: 0.1 } });
+
+    setTimeout(async () => {
+      console.log("setting light intensity back to 0...");
+      await client.sendControl("LightsCtrl", { lights: { value: 0 } });
+    }, 1000);
   });
 
   // subscribe to battery telemetry updates

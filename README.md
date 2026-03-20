@@ -43,9 +43,8 @@ client.connect();
 - `disconnected`: the client is idle and no connection attempt is in progress.
 - `connecting`: `connect()` has been called, but not all three sockets (`sub`, `rpc`, and `pub`) are ready yet.
 - `connected`: all required sockets are ready, and it is safe to call `sendRequest()`, `getTelemetry()`, and `sendControl()`.
-- `reconnecting`: the client was previously connected, then lost one or more sockets and is waiting for them to recover.
 
-`sendRequest()` and `sendControl()` reject unless the client is in the `connected` state. A typical usage pattern is to wait for the `connected` event before sending messages, and optionally listen for `reconnecting` if you want to surface temporary transport loss in your application.
+If the client loses one or more sockets after being connected, it moves back to `connecting` until all required sockets are ready again. `sendRequest()` and `sendControl()` reject unless the client is in the `connected` state.
 
 ## Sonar support
 
@@ -53,5 +52,5 @@ client.connect();
 
 - Sonar support is a basic websocket subscription to the sonar endpoint.
 - Set `autoConnectSonar: true` to connect the sonar socket when the client connects, or call `client.connectSonar()` and `client.disconnectSonar()` manually.
-- Sonar state changes are emitted as `sonarConnecting`, `sonarConnected`, `sonarReconnecting`, and `sonarDisconnected`.
+- Sonar state changes are emitted as `sonarConnecting`, `sonarConnected`, and `sonarDisconnected`.
 - Sonar telemetry such as `MultibeamPingTel`, `MultibeamConfigTel`, and `MultibeamDiscoveryTel` is emitted through the same typed event interface as other telemetry messages.
