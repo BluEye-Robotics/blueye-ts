@@ -79,7 +79,9 @@ type Options = Partial<{
 
 const hasSonarEndpoint = (version: string): boolean => {
   const coercedVersion = semver.coerce(version);
-  return coercedVersion ? semver.satisfies(coercedVersion, ">=4.7.0") : false;
+  return coercedVersion
+    ? semver.satisfies(coercedVersion, ">=4.7.0") || version.endsWith("-dev")
+    : false;
 };
 
 export class BlueyeClient extends Emitter<Events> {
