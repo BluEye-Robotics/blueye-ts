@@ -15,6 +15,7 @@ import { Emitter } from "strict-event-emitter";
 import type z from "zod";
 import { AsyncQueue } from "./async-queue";
 import { responseSchema, telemetrySchema } from "./schema";
+import * as semver from "semver";
 
 const DEFAULT_SUB_URL = "ws://192.168.1.101:9985";
 const DEFAULT_RPC_URL = "ws://192.168.1.101:9986";
@@ -75,6 +76,11 @@ type Options = Partial<{
   logLevel: LogLevel;
   autoConnect: boolean;
 }>;
+
+const hasSonarEndpoint = (version: string): boolean => {
+  const coercedVersion = semver.coerce(version);
+  return coercedVersion ? semver.satisfies(coercedVersion, ">=4.7.0") : false;
+};
 
 export class BlueyeClient extends Emitter<Events> {
   public timeout: number;
@@ -145,6 +151,15 @@ export class BlueyeClient extends Emitter<Events> {
     });
 
     this.once("DroneInfoTel", (msg) => {
+      const version = msg.droneInfo?.blunuxVersion;
+
+      if (!hasSonarEndpoint(version ?? "")) {
+        this.logger.warn(
+          `[sonar] incompatible Blunux version detected in DroneInfoTel: ${version}; sonar telemetry may not be available`,
+        );
+        return;
+      }
+
       const devices = [
         ...(msg.droneInfo?.gp?.gp1?.deviceList?.devices ?? []),
         ...(msg.droneInfo?.gp?.gp2?.deviceList?.devices ?? []),
