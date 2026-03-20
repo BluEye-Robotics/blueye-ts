@@ -48,7 +48,9 @@ type ConnectionLifecycleSocket = {
 };
 
 export type Events = {
-  [K in State]: [SocketName];
+  [K in State]: [];
+} & {
+  [K in `${SocketName}-${State}`]: [];
 } & {
   [K in Tel]: [DecodedTelOutput<K>];
 };
@@ -86,6 +88,7 @@ export class BlueyeClient extends Emitter<Events> {
   private queue: AsyncQueue;
   private logger: ConsolaInstance;
   private shouldBeConnected = false;
+  private isSonarDetected = false;
   private socketState: Record<SocketName, State> = {
     sub: "disconnected",
     rpc: "disconnected",
@@ -137,7 +140,7 @@ export class BlueyeClient extends Emitter<Events> {
       this.handleTelemetryMessage("sonar", topic, msg);
     });
 
-    this.on("DroneInfoTel", (msg) => {
+    this.once("DroneInfoTel", (msg) => {
       const devices = [
         ...(msg.droneInfo?.gp?.gp1?.deviceList?.devices ?? []),
         ...(msg.droneInfo?.gp?.gp2?.deviceList?.devices ?? []),
@@ -149,6 +152,7 @@ export class BlueyeClient extends Emitter<Events> {
           "[sonar] multibeam device detected in DroneInfoTel:",
           devices,
         );
+        this.isSonarDetected = true;
         this.sonarSub.connect(this.sonarUrl);
       }
     });
@@ -161,13 +165,15 @@ export class BlueyeClient extends Emitter<Events> {
   get state(): State {
     if (!this.shouldBeConnected) return "disconnected";
     const { sub, rpc, pub } = this.socketState;
-    if (sub === "connected" && rpc === "connected" && pub === "connected")
+    if (
+      sub === "connected" &&
+      rpc === "connected" &&
+      pub === "connected" &&
+      (this.isSonarDetected ? this.socketState.sonar === "connected" : true)
+    ) {
       return "connected";
+    }
     return "connecting";
-  }
-
-  get sonarState(): State {
-    return this.socketState.sonar;
   }
 
   private updateSocketState(name: SocketName, newState: State) {
@@ -177,7 +183,10 @@ export class BlueyeClient extends Emitter<Events> {
 
     this.socketState[name] = newState;
     this.logger.info(`[${name}] ${newState}`);
-    this.emit(newState, name);
+    this.emit(`${name}-${newState}`);
+
+    // If all sockets are connected, emit "connected"
+    this.emit(this.state);
   }
 
   private handleTelemetryMessage(
@@ -321,6 +330,11 @@ export class BlueyeClient extends Emitter<Events> {
     const response = await this.sendRequest("GetTelemetryReq", {
       messageType: type,
     });
+
+    if (!response) {
+      throw new Error(`[rpc] no response for telemetry request: ${type}`);
+    }
+
     const { payload } = telemetrySchema.parse(response);
     const { typeUrl, value } = payload;
 
