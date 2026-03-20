@@ -17,6 +17,8 @@ const DEFAULT_RPC_URL = "ws://192.168.1.101:9986";
 const DEFAULT_PUB_URL = "ws://192.168.1.101:9987";
 const DEFAULT_SONAR_URL = "ws://192.168.1.101:9988";
 
+export const MULTIBEAM_DEVICE_IDS = new Set([13, 16, 18, 20, 29, 30, 41, 42]);
+
 export type Protocol = typeof blueye.protocol;
 export type ProtocolType = "Req" | "Rep" | "Tel" | "Ctrl";
 export type ProtocolKey = Extract<keyof Protocol, `${string}${ProtocolType}`>;
@@ -40,25 +42,13 @@ export type DecodedOutput<T extends Req> = ReturnType<ReqToRep<T>["decode"]>;
 export type DecodedTelOutput<T extends Tel> = ReturnType<Protocol[T]["decode"]>;
 
 type State = "connecting" | "connected" | "disconnected";
-type SocketName = "sub" | "rpc" | "pub";
+export type SocketName = "sub" | "rpc" | "pub" | "sonar";
 type ConnectionLifecycleSocket = {
   on(event: "ready" | "lost", listener: () => void): unknown;
 };
-type SonarStateEvent =
-  | "sonarConnecting"
-  | "sonarConnected"
-  | "sonarDisconnected";
-
-const SONAR_STATE_EVENTS: Record<State, SonarStateEvent> = {
-  connecting: "sonarConnecting",
-  connected: "sonarConnected",
-  disconnected: "sonarDisconnected",
-};
 
 export type Events = {
-  [K in State]: [];
-} & {
-  [K in SonarStateEvent]: [];
+  [K in State]: [SocketName];
 } & {
   [K in Tel]: [DecodedTelOutput<K>];
 };
@@ -78,12 +68,9 @@ type Options = Partial<{
   reconnectInterval: number;
   logLevel: LogLevel;
   autoConnect: boolean;
-  autoConnectSonar: boolean;
 }>;
 
 export class BlueyeClient extends Emitter<Events> {
-  public state: State = "disconnected";
-  public sonarState: State = "disconnected";
   public timeout: number;
   public reconnectInterval: number;
 
@@ -99,14 +86,12 @@ export class BlueyeClient extends Emitter<Events> {
   private queue: AsyncQueue;
   private logger: ConsolaInstance;
   private shouldBeConnected = false;
-  private shouldBeSonarConnected = false;
-  private autoConnectSonar: boolean;
-  private socketReady: Record<SocketName, boolean> = {
-    sub: false,
-    rpc: false,
-    pub: false,
+  private socketState: Record<SocketName, State> = {
+    sub: "disconnected",
+    rpc: "disconnected",
+    pub: "disconnected",
+    sonar: "disconnected",
   };
-  private sonarReady = false;
 
   constructor({
     subUrl = DEFAULT_SUB_URL,
@@ -117,7 +102,6 @@ export class BlueyeClient extends Emitter<Events> {
     reconnectInterval = 2000,
     logLevel = LogLevels.info,
     autoConnect = false,
-    autoConnectSonar = false,
   }: Options = {}) {
     super();
 
@@ -128,7 +112,6 @@ export class BlueyeClient extends Emitter<Events> {
     this.rpcUrl = rpcUrl;
     this.pubUrl = pubUrl;
     this.sonarUrl = sonarUrl;
-    this.autoConnectSonar = autoConnectSonar;
 
     this.sub = new ZMQSub();
     this.rpc = new ZMQRep();
@@ -144,14 +127,14 @@ export class BlueyeClient extends Emitter<Events> {
     this.bindSocketLifecycle("sub", this.sub);
     this.bindSocketLifecycle("rpc", this.rpc);
     this.bindSocketLifecycle("pub", this.pub);
-    this.bindSonarLifecycle(this.sonarSub);
+    this.bindSocketLifecycle("sonar", this.sonarSub);
 
     this.sub.on("message", (topic, msg) => {
       this.handleTelemetryMessage("sub", topic, msg);
     });
 
     this.sonarSub.on("message", (topic, msg) => {
-      this.handleTelemetryMessage("sonar-sub", topic, msg);
+      this.handleTelemetryMessage("sonar", topic, msg);
     });
 
     if (autoConnect) {
@@ -159,28 +142,30 @@ export class BlueyeClient extends Emitter<Events> {
     }
   }
 
-  private updateState(newState: State) {
-    if (this.state === newState) {
-      return;
-    }
-
-    this.state = newState;
-    this.logger.info(`[client] ${newState}`);
-    this.emit(newState);
+  get state(): State {
+    if (!this.shouldBeConnected) return "disconnected";
+    const { sub, rpc, pub } = this.socketState;
+    if (sub === "connected" && rpc === "connected" && pub === "connected")
+      return "connected";
+    return "connecting";
   }
 
-  private updateSonarState(newState: State) {
-    if (this.sonarState === newState) {
+  get sonarState(): State {
+    return this.socketState.sonar;
+  }
+
+  private updateSocketState(name: SocketName, newState: State) {
+    if (this.socketState[name] === newState) {
       return;
     }
 
-    this.sonarState = newState;
-    this.logger.info(`[sonar-client] ${newState}`);
-    this.emit(SONAR_STATE_EVENTS[newState]);
+    this.socketState[name] = newState;
+    this.logger.info(`[${name}] ${newState}`);
+    this.emit(newState, name);
   }
 
   private handleTelemetryMessage(
-    socketName: "sub" | "sonar-sub",
+    socketName: "sub" | "sonar",
     topic: Buffer,
     msg: Uint8Array,
   ) {
@@ -203,102 +188,14 @@ export class BlueyeClient extends Emitter<Events> {
     socket: ConnectionLifecycleSocket,
   ) {
     socket.on("ready", () => {
-      this.setSocketReady(name, true);
+      if (!this.shouldBeConnected) return;
+      this.updateSocketState(name, "connected");
     });
 
     socket.on("lost", () => {
-      this.setSocketReady(name, false);
+      if (!this.shouldBeConnected) return;
+      this.updateSocketState(name, "connecting");
     });
-  }
-
-  private bindSonarLifecycle(socket: ConnectionLifecycleSocket) {
-    socket.on("ready", () => {
-      this.setSonarReady(true);
-    });
-
-    socket.on("lost", () => {
-      this.setSonarReady(false);
-    });
-  }
-
-  private setSocketReady(name: SocketName, ready: boolean) {
-    if (this.socketReady[name] === ready) {
-      return;
-    }
-
-    this.socketReady[name] = ready;
-    this.logger.debug(`[client] ${name} socket ${ready ? "ready" : "lost"}`);
-
-    if (!this.shouldBeConnected) {
-      return;
-    }
-
-    if (this.allSocketsReady()) {
-      this.updateState("connected");
-      return;
-    }
-
-    this.updateState("connecting");
-  }
-
-  private resetSocketReadiness() {
-    this.socketReady.sub = false;
-    this.socketReady.rpc = false;
-    this.socketReady.pub = false;
-  }
-
-  private allSocketsReady() {
-    return this.socketReady.sub && this.socketReady.rpc && this.socketReady.pub;
-  }
-
-  private setSonarReady(ready: boolean) {
-    if (this.sonarReady === ready) {
-      return;
-    }
-
-    this.sonarReady = ready;
-    this.logger.debug(`[sonar-client] socket ${ready ? "ready" : "lost"}`);
-
-    if (!this.shouldBeSonarConnected) {
-      return;
-    }
-
-    if (this.sonarReady) {
-      this.updateSonarState("connected");
-      return;
-    }
-
-    this.updateSonarState("connecting");
-  }
-
-  connectSonar() {
-    if (this.sonarState === "connected") {
-      return;
-    }
-
-    if (this.sonarState === "connecting") {
-      return;
-    }
-
-    this.shouldBeSonarConnected = true;
-    this.sonarReady = false;
-    this.sonarSub.options.reconnectInterval = this.reconnectInterval;
-    this.updateSonarState("connecting");
-    this.sonarSub.subscribe("");
-    this.sonarSub.connect(this.sonarUrl);
-  }
-
-  disconnectSonar() {
-    this.shouldBeSonarConnected = false;
-    this.sonarReady = false;
-
-    if (this.sonarState === "disconnected") {
-      return;
-    }
-
-    this.sonarSub.unsubscribe("");
-    this.sonarSub.disconnect(this.sonarUrl);
-    this.updateSonarState("disconnected");
   }
 
   private ensureConnected(operation: "request" | "control") {
@@ -310,47 +207,48 @@ export class BlueyeClient extends Emitter<Events> {
   }
 
   connect() {
-    if (this.state === "connected") {
-      this.logger.warn("[client] already connected");
-      return;
-    }
-
-    if (this.state === "connecting") {
-      this.logger.warn(`[client] already ${this.state}`);
+    if (this.shouldBeConnected) {
+      this.logger.warn("[client] already connecting or connected");
       return;
     }
 
     this.sub.options.reconnectInterval = this.reconnectInterval;
     this.rpc.options.reconnectInterval = this.reconnectInterval;
     this.pub.options.reconnectInterval = this.reconnectInterval;
+    this.sonarSub.options.reconnectInterval = this.reconnectInterval;
 
     this.shouldBeConnected = true;
-    this.resetSocketReadiness();
-    this.updateState("connecting");
+
+    for (const name of ["sub", "rpc", "pub", "sonar"] as const) {
+      this.updateSocketState(name, "connecting");
+    }
+
     this.sub.subscribe("");
     this.sub.connect(this.subUrl);
     this.rpc.connect(this.rpcUrl);
     this.pub.connect(this.pubUrl);
-
-    if (this.autoConnectSonar) {
-      this.connectSonar();
-    }
+    this.sonarSub.subscribe("");
+    this.sonarSub.connect(this.sonarUrl);
   }
 
   disconnect() {
-    if (this.state === "disconnected") {
+    if (!this.shouldBeConnected) {
       this.logger.warn("[client] already disconnected");
       return;
     }
 
     this.shouldBeConnected = false;
-    this.disconnectSonar();
+
     this.sub.unsubscribe("");
     this.sub.disconnect(this.subUrl);
     this.rpc.disconnect(this.rpcUrl);
     this.pub.disconnect(this.pubUrl);
-    this.resetSocketReadiness();
-    this.updateState("disconnected");
+    this.sonarSub.unsubscribe("");
+    this.sonarSub.disconnect(this.sonarUrl);
+
+    for (const name of ["sub", "rpc", "pub", "sonar"] as const) {
+      this.updateSocketState(name, "disconnected");
+    }
   }
 
   async sendRequest<T extends Req>(

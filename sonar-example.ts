@@ -1,30 +1,18 @@
 import { BlueyeClient } from "./index";
 
 const main = async () => {
-  const client = new BlueyeClient({ autoConnectSonar: true });
+  const client = new BlueyeClient();
 
-  client.on("connected", async () => {
-    try {
-      console.log("client connected");
-    } catch (error) {
-      console.error("Error:", error);
-    }
+  client.on("connected", (socket) => {
+    console.log(`${socket} connected`);
   });
 
-  client.on("disconnected", () => {
-    console.log("client disconnected");
+  client.on("connecting", (socket) => {
+    console.log(`${socket} connecting...`);
   });
 
-  client.on("sonarConnecting", () => {
-    console.log("sonar connecting...");
-  });
-
-  client.on("sonarConnected", () => {
-    console.log("sonar connected");
-  });
-
-  client.on("sonarDisconnected", () => {
-    console.log("sonar disconnected");
+  client.on("disconnected", (socket) => {
+    console.log(`${socket} disconnected`);
   });
 
   client.on("MultibeamDiscoveryTel", (data) => {

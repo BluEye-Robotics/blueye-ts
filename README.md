@@ -15,7 +15,9 @@ import { BlueyeClient } from "@blueyerobotics/blueye-ts";
 
 const client = new BlueyeClient();
 
-client.on("connected", async () => {
+client.on("connected", async (socket) => {
+  if (socket !== "rpc") return;
+
   // request battery information
   const batteryRep = await client.sendRequest("GetBatteryReq");
   console.log("batteryRep:", batteryRep);
@@ -38,19 +40,26 @@ client.connect();
 
 ## Connection states
 
-`BlueyeClient` emits state events and exposes the current state on `client.state`.
+`BlueyeClient` manages four sockets: `sub`, `rpc`, `pub`, and `sonar`. State events (`connecting`, `connected`, `disconnected`) carry the socket name as an argument, so you can react to individual socket changes:
 
-- `disconnected`: the client is idle and no connection attempt is in progress.
-- `connecting`: `connect()` has been called, but not all three sockets (`sub`, `rpc`, and `pub`) are ready yet.
-- `connected`: all required sockets are ready, and it is safe to call `sendRequest()`, `getTelemetry()`, and `sendControl()`.
+```ts
+client.on("connected", (socket) => {
+  console.log(`${socket} connected`);
+});
+```
 
-If the client loses one or more sockets after being connected, it moves back to `connecting` until all required sockets are ready again. `sendRequest()` and `sendControl()` reject unless the client is in the `connected` state.
+The derived `client.state` reflects the aggregate of the three core sockets (`sub`, `rpc`, `pub`):
+
+- `disconnected`: `connect()` has not been called.
+- `connecting`: one or more core sockets are not yet ready.
+- `connected`: all three core sockets are ready — safe to call `sendRequest()`, `getTelemetry()`, and `sendControl()`.
+
+`client.sonarState` reflects the sonar socket independently. `connect()` and `disconnect()` manage all four sockets together.
+
+If the client loses one or more sockets after being connected, the derived state moves back to `connecting` until all required sockets are ready again. `sendRequest()` and `sendControl()` reject unless the client is in the `connected` state.
 
 ## Sonar support
 
-`BlueyeClient` can also manage the optional sonar websocket endpoint at `ws://192.168.1.101:9988`.
+`BlueyeClient` connects the sonar websocket endpoint at `ws://192.168.1.101:9988` as part of `connect()`.
 
-- Sonar support is a basic websocket subscription to the sonar endpoint.
-- Set `autoConnectSonar: true` to connect the sonar socket when the client connects, or call `client.connectSonar()` and `client.disconnectSonar()` manually.
-- Sonar state changes are emitted as `sonarConnecting`, `sonarConnected`, and `sonarDisconnected`.
 - Sonar telemetry such as `MultibeamPingTel`, `MultibeamConfigTel`, and `MultibeamDiscoveryTel` is emitted through the same typed event interface as other telemetry messages.

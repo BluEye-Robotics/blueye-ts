@@ -29,6 +29,45 @@ const waitForEvent = async (emitter, eventName, timeout = 2_000) => {
   ]);
 };
 
+const waitForState = async (client, targetState, timeout = 2_000) => {
+  if (client.state === targetState) return;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`Timed out waiting for state "${targetState}"`)),
+      timeout,
+    );
+    const check = () => {
+      if (client.state === targetState) {
+        clearTimeout(timer);
+        client.removeListener("connected", check);
+        client.removeListener("connecting", check);
+        client.removeListener("disconnected", check);
+        resolve();
+      }
+    };
+    client.on("connected", check);
+    client.on("connecting", check);
+    client.on("disconnected", check);
+  });
+};
+
+const waitForSocketEvent = async (client, event, socketName, timeout = 2_000) => {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`Timed out waiting for "${event}" on "${socketName}"`)),
+      timeout,
+    );
+    const handler = (socket) => {
+      if (socket === socketName) {
+        clearTimeout(timer);
+        client.removeListener(event, handler);
+        resolve();
+      }
+    };
+    client.on(event, handler);
+  });
+};
+
 const getFreePort = async () => {
   return new Promise((resolve, reject) => {
     const server = net.createServer();
@@ -209,14 +248,11 @@ test("BlueyeClient connects and exchanges request, telemetry, and control messag
     ...urls,
     reconnectInterval: 50,
     timeout: 500,
-    autoConnectSonar: false,
   });
 
   try {
-    const connected = waitForEvent(client, "connected");
-
     client.connect();
-    await connected;
+    await waitForState(client, "connected");
 
     assert.equal(client.state, "connected");
 
@@ -265,7 +301,6 @@ test("BlueyeClient stays connecting without a server and allows manual disconnec
     ...urls,
     reconnectInterval: 50,
     timeout: 100,
-    autoConnectSonar: false,
   });
 
   client.connect();
@@ -294,19 +329,18 @@ test("BlueyeClient returns to connecting and reconnects after the server returns
     ...urls,
     reconnectInterval: 50,
     timeout: 500,
-    autoConnectSonar: false,
   });
 
   try {
     client.connect();
-    await waitForEvent(client, "connected");
+    await waitForState(client, "connected");
 
     harness.close();
-    await waitForEvent(client, "connecting", 3_000);
+    await waitForState(client, "connecting", 3_000);
     assert.equal(client.state, "connecting");
 
     harness = await createHarness(urls);
-    await waitForEvent(client, "connected", 3_000);
+    await waitForState(client, "connected", 3_000);
 
     const batteryRep = await client.sendRequest("GetBatteryReq");
     assertBattery(batteryRep.battery);
@@ -323,15 +357,14 @@ test("BlueyeClient stays connecting during repeated failures and stops after man
     ...urls,
     reconnectInterval: 50,
     timeout: 100,
-    autoConnectSonar: false,
   });
 
   try {
     client.connect();
-    await waitForEvent(client, "connected");
+    await waitForState(client, "connected");
 
     harness.close();
-    await waitForEvent(client, "connecting", 3_000);
+    await waitForState(client, "connecting", 3_000);
     await delay(200);
 
     assert.equal(client.state, "connecting");
@@ -358,22 +391,19 @@ test("BlueyeClient stays connecting during repeated failures and stops after man
   }
 });
 
-test("BlueyeClient connects a basic sonar subscription and emits sonar telemetry", async () => {
+test("BlueyeClient connects sonar and emits sonar telemetry", async () => {
   const urls = await createUrls();
   const harness = await createHarness(urls);
   const client = new BlueyeClient({
     ...urls,
     reconnectInterval: 50,
     timeout: 500,
-    autoConnectSonar: false,
   });
 
   try {
     client.connect();
-    await waitForEvent(client, "connected");
-
-    client.connectSonar();
-    await waitForEvent(client, "sonarConnected", 3_000);
+    await waitForState(client, "connected");
+    await waitForSocketEvent(client, "connected", "sonar", 3_000);
 
     assert.equal(client.sonarState, "connected");
 

@@ -3,7 +3,9 @@ import { BlueyeClient } from "./index";
 const main = async () => {
   const client = new BlueyeClient();
 
-  client.on("connected", async () => {
+  client.on("connected", async (socket) => {
+    if (socket !== "rpc") return;
+
     try {
       // request battery information
       const batteryRep = await client.sendRequest("GetBatteryReq");
