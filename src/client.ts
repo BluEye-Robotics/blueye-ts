@@ -17,7 +17,7 @@ const DEFAULT_RPC_URL = "ws://192.168.1.101:9986";
 const DEFAULT_PUB_URL = "ws://192.168.1.101:9987";
 const DEFAULT_SONAR_URL = "ws://192.168.1.101:9988";
 
-export const MULTIBEAM_DEVICE_IDS = new Set([13, 16, 18, 20, 29, 30, 41, 42]);
+export const MULTIBEAM_DEVICE_IDS = [13, 16, 18, 20, 29, 30, 41, 42];
 
 export type Protocol = typeof blueye.protocol;
 export type ProtocolType = "Req" | "Rep" | "Tel" | "Ctrl";
@@ -137,6 +137,22 @@ export class BlueyeClient extends Emitter<Events> {
       this.handleTelemetryMessage("sonar", topic, msg);
     });
 
+    this.on("DroneInfoTel", (msg) => {
+      const devices = [
+        ...(msg.droneInfo?.gp?.gp1?.deviceList?.devices ?? []),
+        ...(msg.droneInfo?.gp?.gp2?.deviceList?.devices ?? []),
+        ...(msg.droneInfo?.gp?.gp3?.deviceList?.devices ?? []),
+      ].map((device) => device.deviceId);
+
+      if (devices.some((deviceId) => MULTIBEAM_DEVICE_IDS.includes(deviceId))) {
+        this.logger.info(
+          "[sonar] multibeam device detected in DroneInfoTel:",
+          devices,
+        );
+        this.sonarSub.connect(this.sonarUrl);
+      }
+    });
+
     if (autoConnect) {
       this.connect();
     }
@@ -228,7 +244,6 @@ export class BlueyeClient extends Emitter<Events> {
     this.rpc.connect(this.rpcUrl);
     this.pub.connect(this.pubUrl);
     this.sonarSub.subscribe("");
-    this.sonarSub.connect(this.sonarUrl);
   }
 
   disconnect() {
