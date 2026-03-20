@@ -3,16 +3,24 @@ import { BlueyeClient } from "./index";
 const main = async () => {
   const client = new BlueyeClient();
 
-  client.on("connected", (socket) => {
-    console.log(`${socket} connected`);
+  client.on("connected", () => {
+    console.log("client connected");
   });
 
-  client.on("connecting", (socket) => {
-    console.log(`${socket} connecting...`);
+  client.on("connecting", () => {
+    console.log("client connecting...");
   });
 
-  client.on("disconnected", (socket) => {
-    console.log(`${socket} disconnected`);
+  client.on("disconnected", () => {
+    console.log("client disconnected");
+  });
+
+  client.on("sonar-connected", () => {
+    console.log("sonar connected");
+  });
+
+  client.on("sonar-connecting", () => {
+    console.log("sonar connecting...");
   });
 
   client.on("MultibeamDiscoveryTel", (data) => {

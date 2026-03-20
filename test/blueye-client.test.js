@@ -51,23 +51,6 @@ const waitForState = async (client, targetState, timeout = 2_000) => {
   });
 };
 
-const waitForSocketEvent = async (client, event, socketName, timeout = 2_000) => {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new Error(`Timed out waiting for "${event}" on "${socketName}"`)),
-      timeout,
-    );
-    const handler = (socket) => {
-      if (socket === socketName) {
-        clearTimeout(timer);
-        client.removeListener(event, handler);
-        resolve();
-      }
-    };
-    client.on(event, handler);
-  });
-};
-
 const getFreePort = async () => {
   return new Promise((resolve, reject) => {
     const server = net.createServer();
@@ -125,6 +108,21 @@ const createGetTelemetryRep = (type, payload) => ({
   payload: {
     typeUrl: `blueye.protocol.${type}`,
     value: blueye.protocol[type].encode(blueye.protocol[type].create(payload)).finish(),
+  },
+});
+
+const createDroneInfoTel = (deviceId = null) => ({
+  droneInfo: {
+    gp:
+      deviceId == null
+        ? undefined
+        : {
+            gp1: {
+              deviceList: {
+                devices: [{ deviceId, name: "" }],
+              },
+            },
+          },
   },
 });
 
@@ -391,7 +389,7 @@ test("BlueyeClient stays connecting during repeated failures and stops after man
   }
 });
 
-test("BlueyeClient connects sonar and emits sonar telemetry", async () => {
+test("BlueyeClient detects sonar from DroneInfoTel and emits sonar telemetry", async () => {
   const urls = await createUrls();
   const harness = await createHarness(urls);
   const client = new BlueyeClient({
@@ -403,9 +401,13 @@ test("BlueyeClient connects sonar and emits sonar telemetry", async () => {
   try {
     client.connect();
     await waitForState(client, "connected");
-    await waitForSocketEvent(client, "connected", "sonar", 3_000);
 
-    assert.equal(client.sonarState, "connected");
+    // Publish DroneInfoTel with a known multibeam device ID to trigger sonar detection
+    const sonarConnected = waitForEvent(client, "sonar-connected", 3_000);
+    await harness.publishTelemetry("DroneInfoTel", createDroneInfoTel(13));
+
+    await sonarConnected;
+    assert.equal(client.state, "connected");
 
     const [multibeam] = await Promise.all([
       waitForEvent(client, "MultibeamPingTel"),
@@ -413,6 +415,31 @@ test("BlueyeClient connects sonar and emits sonar telemetry", async () => {
     ]);
 
     assert.equal(multibeam[0].ping?.deviceId, 13);
+  } finally {
+    client.disconnect();
+    harness.close();
+  }
+});
+
+test("BlueyeClient does not require sonar for connected state when no multibeam detected", async () => {
+  const urls = await createUrls();
+  const harness = await createHarness(urls);
+  const client = new BlueyeClient({
+    ...urls,
+    reconnectInterval: 50,
+    timeout: 500,
+  });
+
+  try {
+    client.connect();
+    await waitForState(client, "connected");
+
+    // No DroneInfoTel published — global state is connected without sonar
+    assert.equal(client.state, "connected");
+
+    // RPC still works without sonar
+    const batteryRep = await client.sendRequest("GetBatteryReq");
+    assertBattery(batteryRep.battery);
   } finally {
     client.disconnect();
     harness.close();
