@@ -1,23 +1,11 @@
-import { BlueyeClient, SONAR_DEVICE_INFO } from "./index";
+import { BlueyeClient } from "./index";
 
 const main = async () => {
-  const client = new BlueyeClient();
+  const client = new BlueyeClient({ autoConnectSonar: true });
 
   client.on("connected", async () => {
     try {
       console.log("client connected");
-
-      const multibeam = await client.getConnectedMultibeam();
-      if (!multibeam) {
-        console.log("no supported multibeam detected");
-        return;
-      }
-
-      console.log("connected multibeam:", multibeam);
-      console.log(
-        "device capabilities:",
-        SONAR_DEVICE_INFO[multibeam.deviceId] ?? "unknown",
-      );
     } catch (error) {
       console.error("Error:", error);
     }

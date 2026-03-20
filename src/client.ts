@@ -10,10 +10,6 @@ import { Pub as ZMQPub, Req as ZMQRep, Sub as ZMQSub } from "jszmq";
 import { Emitter } from "strict-event-emitter";
 import type z from "zod";
 import { AsyncQueue } from "./async-queue";
-import {
-  getConnectedMultibeam as getConnectedMultibeamFromDroneInfo,
-  type ConnectedMultibeam,
-} from "./devices";
 import { responseSchema, telemetrySchema } from "./schema";
 
 const DEFAULT_SUB_URL = "ws://192.168.1.101:9985";
@@ -92,7 +88,6 @@ export class BlueyeClient extends Emitter<Events> {
   public sonarState: State = "disconnected";
   public timeout: number;
   public reconnectInterval: number;
-  public connectedMultibeam: ConnectedMultibeam | null = null;
 
   private subUrl: string;
   private rpcUrl: string;
@@ -126,7 +121,7 @@ export class BlueyeClient extends Emitter<Events> {
     reconnectInterval = 2000,
     logLevel = LogLevels.info,
     autoConnect = false,
-    autoConnectSonar = true,
+    autoConnectSonar = false,
   }: Options = {}) {
     super();
 
@@ -161,16 +156,6 @@ export class BlueyeClient extends Emitter<Events> {
 
     this.sonarSub.on("message", (topic, msg) => {
       this.handleTelemetryMessage("sonar-sub", topic, msg);
-    });
-
-    this.on("connected", () => {
-      if (!this.autoConnectSonar) {
-        return;
-      }
-
-      void this.refreshSonarConnection().catch((error) => {
-        this.logger.warn("[sonar] failed to refresh sonar status:", error);
-      });
     });
 
     if (autoConnect) {
@@ -212,10 +197,6 @@ export class BlueyeClient extends Emitter<Events> {
 
     const protocol = blueye.protocol[key as Tel];
     const message = protocol.decode(data) as DecodedTelOutput<Tel>;
-
-    if (socketName === "sub" && key === "DroneInfoTel") {
-      this.setConnectedMultibeam(message as DecodedTelOutput<"DroneInfoTel">);
-    }
 
     this.logger.verbose(`[${socketName}] message:`, key, message);
     this.emit(key as Tel, message as never);
@@ -281,12 +262,6 @@ export class BlueyeClient extends Emitter<Events> {
     return this.socketReady.sub && this.socketReady.rpc && this.socketReady.pub;
   }
 
-  private setConnectedMultibeam(droneInfo: DecodedTelOutput<"DroneInfoTel"> | null) {
-    this.connectedMultibeam = getConnectedMultibeamFromDroneInfo(droneInfo);
-    this.syncSonarConnection();
-    return this.connectedMultibeam;
-  }
-
   private setSonarReady(ready: boolean) {
     if (this.sonarReady === ready) {
       return;
@@ -314,20 +289,7 @@ export class BlueyeClient extends Emitter<Events> {
     this.updateSonarState(this.hasSonarConnected ? "reconnecting" : "connecting");
   }
 
-  private syncSonarConnection() {
-    if (
-      this.state !== "connected" ||
-      !this.autoConnectSonar ||
-      this.connectedMultibeam == null
-    ) {
-      this.disconnectSonar();
-      return;
-    }
-
-    this.connectSonar();
-  }
-
-  private connectSonar() {
+  connectSonar() {
     if (this.sonarState === "connected") {
       return;
     }
@@ -345,7 +307,7 @@ export class BlueyeClient extends Emitter<Events> {
     this.sonarSub.connect(this.sonarUrl);
   }
 
-  private disconnectSonar() {
+  disconnectSonar() {
     this.shouldBeSonarConnected = false;
     this.sonarReady = false;
     this.hasSonarConnected = false;
@@ -390,6 +352,10 @@ export class BlueyeClient extends Emitter<Events> {
     this.sub.connect(this.subUrl);
     this.rpc.connect(this.rpcUrl);
     this.pub.connect(this.pubUrl);
+
+    if (this.autoConnectSonar) {
+      this.connectSonar();
+    }
   }
 
   disconnect() {
@@ -400,7 +366,6 @@ export class BlueyeClient extends Emitter<Events> {
 
     this.shouldBeConnected = false;
     this.hasConnected = false;
-    this.connectedMultibeam = null;
     this.disconnectSonar();
     this.sub.unsubscribe("");
     this.sub.disconnect(this.subUrl);
@@ -479,14 +444,6 @@ export class BlueyeClient extends Emitter<Events> {
     this.logger.debug("[rpc] result:", result);
 
     return result;
-  }
-
-  async getConnectedMultibeam(): Promise<ConnectedMultibeam | null> {
-    return this.setConnectedMultibeam(await this.getTelemetry("DroneInfoTel"));
-  }
-
-  async refreshSonarConnection(): Promise<ConnectedMultibeam | null> {
-    return this.getConnectedMultibeam();
   }
 
   async sendControl<T extends Ctrl>(ctrl: T, opts: CreateArgs<T> = {}) {

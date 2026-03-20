@@ -22,7 +22,7 @@ const main = async () => {
         await client.sendControl("LightsCtrl", { lights: { value: 0 } });
       }, 1000);
     } catch (error) {
-      console.error("Error:", error);
+      // console.error("Error:", error);
     }
   });
 

@@ -89,26 +89,6 @@ const createGetTelemetryRep = (type, payload) => ({
   },
 });
 
-const createDroneInfoTel = (deviceId = null) => ({
-  droneInfo: {
-    gp:
-      deviceId == null
-        ? undefined
-        : {
-            gp1: {
-              deviceList: {
-                devices: [
-                  {
-                    deviceId,
-                    name: "",
-                  },
-                ],
-              },
-            },
-          },
-  },
-});
-
 const createMultibeamPingTel = (deviceId = 13) => ({
   ping: {
     range: 10,
@@ -124,8 +104,7 @@ const createMultibeamPingTel = (deviceId = 13) => ({
   },
 });
 
-const createHarness = async (urls, options = {}) => {
-  const { connectedMultibeamDeviceId = null } = options;
+const createHarness = async (urls) => {
   const telemetry = new jsmq.XPub();
   const rpc = new jsmq.Rep();
   const control = new jsmq.Sub();
@@ -169,13 +148,12 @@ const createHarness = async (urls, options = {}) => {
 
     if (key === "GetTelemetryReq") {
       const request = blueye.protocol.GetTelemetryReq.decode(payload);
-      const response =
-        request.messageType === "DroneInfoTel"
-          ? createDroneInfoTel(connectedMultibeamDeviceId)
-          : createBatteryTel();
       rpc.send([
         Buffer.from("blueye.protocol.GetTelemetryRep"),
-        encodeMessage("GetTelemetryRep", createGetTelemetryRep(request.messageType, response)),
+        encodeMessage(
+          "GetTelemetryRep",
+          createGetTelemetryRep(request.messageType, createBatteryTel()),
+        ),
       ]);
       return;
     }
@@ -380,25 +358,24 @@ test("BlueyeClient stays reconnecting during repeated failures and stops after m
   }
 });
 
-test("BlueyeClient detects a connected sonar and emits sonar telemetry", async () => {
+test("BlueyeClient connects a basic sonar subscription and emits sonar telemetry", async () => {
   const urls = await createUrls();
-  const harness = await createHarness(urls, { connectedMultibeamDeviceId: 13 });
+  const harness = await createHarness(urls);
   const client = new BlueyeClient({
     ...urls,
     reconnectInterval: 50,
     timeout: 500,
+    autoConnectSonar: false,
   });
 
   try {
     client.connect();
     await waitForEvent(client, "connected");
+
+    client.connectSonar();
     await waitForEvent(client, "sonarConnected", 3_000);
 
     assert.equal(client.sonarState, "connected");
-    assert.deepEqual(client.connectedMultibeam, {
-      deviceId: 13,
-      name: "Oculus M750D",
-    });
 
     const [multibeam] = await Promise.all([
       waitForEvent(client, "MultibeamPingTel"),

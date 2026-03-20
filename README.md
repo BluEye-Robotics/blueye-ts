@@ -51,8 +51,7 @@ client.connect();
 
 `BlueyeClient` can also manage the optional sonar websocket endpoint at `ws://192.168.1.101:9988`.
 
-- When the main client reaches `connected`, it requests `DroneInfoTel` and inspects the guest-port device list.
-- If a supported multibeam sonar is present, the client automatically connects the sonar socket and exposes its state through `client.sonarState`.
+- Sonar support is a basic websocket subscription to the sonar endpoint.
+- Set `autoConnectSonar: true` to connect the sonar socket when the client connects, or call `client.connectSonar()` and `client.disconnectSonar()` manually.
 - Sonar state changes are emitted as `sonarConnecting`, `sonarConnected`, `sonarReconnecting`, and `sonarDisconnected`.
-- The detected device is exposed as `client.connectedMultibeam`, and you can refresh detection manually with `await client.getConnectedMultibeam()` or `await client.refreshSonarConnection()`.
 - Sonar telemetry such as `MultibeamPingTel`, `MultibeamConfigTel`, and `MultibeamDiscoveryTel` is emitted through the same typed event interface as other telemetry messages.
