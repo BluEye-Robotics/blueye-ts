@@ -142,7 +142,7 @@ const createMultibeamPingTel = (deviceId = 13) => ({
   },
 });
 
-const createHarness = async (urls) => {
+const createHarness = async (urls, opts = {}) => {
   const telemetry = new jsmq.XPub();
   const rpc = new jsmq.Rep();
   const control = new jsmq.Sub();
@@ -150,6 +150,10 @@ const createHarness = async (urls) => {
 
   const controls = [];
   const rpcRequests = [];
+  // Set of telemetry type names for which GetTelemetryReq should return an
+  // empty (payload-less) response, forcing the client to fall back to SUB.
+  const failTelemetryRpc = new Set(opts.failTelemetryRpc ?? []);
+
   let resolveTelemetrySubscription;
   const telemetrySubscription = new Promise((resolve) => {
     resolveTelemetrySubscription = resolve;
@@ -186,6 +190,16 @@ const createHarness = async (urls) => {
 
     if (key === "GetTelemetryReq") {
       const request = blueye.protocol.GetTelemetryReq.decode(payload);
+
+      if (failTelemetryRpc.has(request.messageType)) {
+        // Respond with an empty rep (no payload) so Zod validation fails
+        rpc.send([
+          Buffer.from("blueye.protocol.GetTelemetryRep"),
+          encodeMessage("GetTelemetryRep", {}),
+        ]);
+        return;
+      }
+
       rpc.send([
         Buffer.from("blueye.protocol.GetTelemetryRep"),
         encodeMessage(
@@ -269,7 +283,7 @@ test("BlueyeClient connects and exchanges request, telemetry, and control messag
     await client.sendControl("LightsCtrl", { lights: { value: 0.2 } });
     await delay(50);
 
-    assert.deepEqual(harness.rpcRequests, ["GetBatteryReq", "GetTelemetryReq"]);
+    assert.deepEqual(harness.rpcRequests, ["GetTelemetryReq", "GetBatteryReq", "GetTelemetryReq"]);
     assert.equal(harness.controls.at(-1)?.key, "LightsCtrl");
     assert.ok(
       Math.abs(harness.controls.at(-1)?.payload.lights?.value - 0.2) < 1e-5,
@@ -441,6 +455,117 @@ test("BlueyeClient does not require sonar for connected state when no multibeam 
     // RPC still works without sonar
     const batteryRep = await client.sendRequest("GetBatteryReq");
     assertBattery(batteryRep.battery);
+  } finally {
+    client.disconnect();
+    harness.close();
+  }
+});
+
+// --- waitForTelemetry tests ---
+
+test("waitForTelemetry resolves via RPC when telemetry is available", async () => {
+  const urls = await createUrls();
+  const harness = await createHarness(urls);
+  const client = new BlueyeClient({
+    ...urls,
+    reconnectInterval: 50,
+    timeout: 500,
+  });
+
+  try {
+    client.connect();
+    await waitForState(client, "connected");
+
+    const result = await client.waitForTelemetry("BatteryTel");
+    assertBattery(result.battery);
+  } finally {
+    client.disconnect();
+    harness.close();
+  }
+});
+
+test("waitForTelemetry falls back to SUB when RPC fails", async () => {
+  const urls = await createUrls();
+  const harness = await createHarness(urls, {
+    failTelemetryRpc: ["BatteryTel"],
+  });
+  const client = new BlueyeClient({
+    ...urls,
+    reconnectInterval: 50,
+    timeout: 500,
+  });
+
+  try {
+    client.connect();
+    await waitForState(client, "connected");
+
+    // Start waiting — RPC will fail, so it blocks on SUB
+    const waiting = client.waitForTelemetry("BatteryTel", 2_000);
+
+    // Publish telemetry over SUB after a short delay
+    await delay(50);
+    await harness.publishTelemetry("BatteryTel", createBatteryTel());
+
+    const result = await waiting;
+    assertBattery(result.battery);
+  } finally {
+    client.disconnect();
+    harness.close();
+  }
+});
+
+test("waitForTelemetry rejects on timeout", async () => {
+  const urls = await createUrls();
+  const harness = await createHarness(urls, {
+    failTelemetryRpc: ["BatteryTel"],
+  });
+  const client = new BlueyeClient({
+    ...urls,
+    reconnectInterval: 50,
+    timeout: 500,
+  });
+
+  try {
+    client.connect();
+    await waitForState(client, "connected");
+
+    await assert.rejects(
+      () => client.waitForTelemetry("BatteryTel", 100),
+      /timed out waiting for BatteryTel telemetry/,
+    );
+  } finally {
+    client.disconnect();
+    harness.close();
+  }
+});
+
+test("waitForTelemetry removes listener on timeout", async () => {
+  const urls = await createUrls();
+  const harness = await createHarness(urls, {
+    failTelemetryRpc: ["BatteryTel"],
+  });
+  const client = new BlueyeClient({
+    ...urls,
+    reconnectInterval: 50,
+    timeout: 500,
+  });
+
+  try {
+    client.connect();
+    await waitForState(client, "connected");
+
+    const before = client.listenerCount("BatteryTel");
+
+    await assert.rejects(
+      () => client.waitForTelemetry("BatteryTel", 100),
+      /timed out/,
+    );
+
+    assert.equal(
+      client.listenerCount("BatteryTel"),
+      before,
+      "listener should be removed after timeout",
+    );
   } finally {
     client.disconnect();
     harness.close();

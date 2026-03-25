@@ -397,9 +397,10 @@ export class BlueyeClient extends Emitter<Events> {
 
     // If that fails, wait for the next telemetry message to arrive via SUB
     return new Promise<DecodedTelOutput<T>>((resolve, reject) => {
-      const listener = (data) => {
+      const listener = (...data: Events[T]) => {
+        this.off(type, listener);
         if (timer) clearTimeout(timer);
-        resolve(data as DecodedTelOutput<T>);
+        resolve(data[0] as DecodedTelOutput<T>);
       };
 
       const timer = timeout
@@ -411,7 +412,7 @@ export class BlueyeClient extends Emitter<Events> {
           }, timeout)
         : null;
 
-      this.once(type, listener);
+      this.on(type, listener);
     });
   }
 
