@@ -152,31 +152,8 @@ export class BlueyeClient extends Emitter<Events> {
       this.handleTelemetryMessage("sonar", topic, msg);
     });
 
-    this.once("DroneInfoTel", (msg) => {
-      const version = msg.droneInfo?.blunuxVersion;
-
-      if (!hasSonarEndpoint(version ?? "")) {
-        this.logger.warn(
-          `[sonar] incompatible Blunux version detected in DroneInfoTel: ${version}; sonar telemetry may not be available`,
-        );
-        return;
-      }
-
-      const devices = [
-        ...(msg.droneInfo?.gp?.gp1?.deviceList?.devices ?? []),
-        ...(msg.droneInfo?.gp?.gp2?.deviceList?.devices ?? []),
-        ...(msg.droneInfo?.gp?.gp3?.deviceList?.devices ?? []),
-      ].map((device) => device.deviceId);
-
-      if (devices.some((deviceId) => MULTIBEAM_DEVICE_IDS.includes(deviceId))) {
-        this.logger.info(
-          "[sonar] multibeam device detected in DroneInfoTel:",
-          devices,
-        );
-        this.isSonarDetected = true;
-        this.sonarSub.connect(this.sonarUrl);
-      }
-    });
+    this.emit(this.state);
+    this.logger.info(`[client] ${this.state}`);
 
     if (autoConnect) {
       this.connect();
@@ -202,12 +179,17 @@ export class BlueyeClient extends Emitter<Events> {
       return;
     }
 
+    const oldState = this.state;
+
     this.socketState[name] = newState;
     this.logger.info(`[${name}] ${newState}`);
     this.emit(`${name}-${newState}`);
 
     // If all sockets are connected, emit "connected"
     this.emit(this.state);
+    if (oldState !== this.state) {
+      this.logger.info(`[client] ${this.state}`);
+    }
   }
 
   private handleTelemetryMessage(
@@ -244,8 +226,8 @@ export class BlueyeClient extends Emitter<Events> {
     });
   }
 
-  private ensureConnected(operation: "request" | "control") {
-    if (this.state !== "connected") {
+  private ensureConnected(operation: "rpc" | "pub") {
+    if (this.socketState[operation] !== "connected") {
       throw new Error(
         `[client] cannot send ${operation} while ${this.state}; call connect() and wait for "connected"`,
       );
@@ -258,6 +240,30 @@ export class BlueyeClient extends Emitter<Events> {
       return;
     }
 
+    this.once("connected", async () => {
+      const msg = await this.waitForTelemetry("DroneInfoTel");
+      const version = msg.droneInfo?.blunuxVersion;
+
+      if (!hasSonarEndpoint(version ?? "")) {
+        this.logger.warn(
+          `[sonar] incompatible Blunux version detected in DroneInfoTel: ${version}; sonar telemetry may not be available`,
+        );
+        return;
+      }
+
+      const devices = [
+        ...(msg.droneInfo?.gp?.gp1?.deviceList?.devices ?? []),
+        ...(msg.droneInfo?.gp?.gp2?.deviceList?.devices ?? []),
+        ...(msg.droneInfo?.gp?.gp3?.deviceList?.devices ?? []),
+      ].map((device) => device.deviceId);
+
+      if (devices.some((deviceId) => MULTIBEAM_DEVICE_IDS.includes(deviceId))) {
+        this.logger.info("[sonar] multibeam device detected in DroneInfoTel");
+        this.isSonarDetected = true;
+        this.sonarSub.connect(this.sonarUrl);
+      }
+    });
+
     this.sub.options.reconnectInterval = this.reconnectInterval;
     this.rpc.options.reconnectInterval = this.reconnectInterval;
     this.pub.options.reconnectInterval = this.reconnectInterval;
@@ -265,9 +271,12 @@ export class BlueyeClient extends Emitter<Events> {
 
     this.shouldBeConnected = true;
 
-    for (const name of ["sub", "rpc", "pub", "sonar"] as const) {
+    for (const name of ["sub", "rpc", "pub"] as const) {
       this.updateSocketState(name, "connecting");
     }
+
+    this.logger.info(`[client] ${this.state}`);
+    this.emit(this.state);
 
     this.sub.subscribe("");
     this.sub.connect(this.subUrl);
@@ -300,7 +309,7 @@ export class BlueyeClient extends Emitter<Events> {
     req: T,
     opts: CreateArgs<T> = {},
   ): Promise<DecodedOutput<T> | null> {
-    this.ensureConnected("request");
+    this.ensureConnected("rpc");
 
     if (!isInProtocol(req) || !req.endsWith("Req")) {
       throw new Error(`[rpc] unknown protocol: ${req}`);
@@ -372,8 +381,42 @@ export class BlueyeClient extends Emitter<Events> {
     return result;
   }
 
+  async waitForTelemetry<T extends Tel>(
+    type: T,
+    timeout: number | null = null,
+  ): Promise<DecodedTelOutput<T>> {
+    // Tries to get the latest telemetry via RPC first, in case we already have it cached in Blunux
+    try {
+      return await this.getTelemetry(type);
+    } catch (error) {
+      this.logger.trace(
+        `[client] failed to get latest ${type} via RPC:`,
+        error,
+      );
+    }
+
+    // If that fails, wait for the next telemetry message to arrive via SUB
+    return new Promise<DecodedTelOutput<T>>((resolve, reject) => {
+      const listener = (data) => {
+        if (timer) clearTimeout(timer);
+        resolve(data as DecodedTelOutput<T>);
+      };
+
+      const timer = timeout
+        ? setTimeout(() => {
+            this.off(type, listener);
+            reject(
+              new Error(`[client] timed out waiting for ${type} telemetry`),
+            );
+          }, timeout)
+        : null;
+
+      this.once(type, listener);
+    });
+  }
+
   async sendControl<T extends Ctrl>(ctrl: T, opts: CreateArgs<T> = {}) {
-    this.ensureConnected("control");
+    this.ensureConnected("pub");
 
     if (!isInProtocol(ctrl) || !ctrl.endsWith("Ctrl")) {
       throw new Error(`[pub] unknown protocol: ${ctrl}`);
