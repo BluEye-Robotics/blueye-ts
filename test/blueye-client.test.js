@@ -107,7 +107,9 @@ const createBatteryTel = () => ({
 const createGetTelemetryRep = (type, payload) => ({
   payload: {
     typeUrl: `blueye.protocol.${type}`,
-    value: blueye.protocol[type].encode(blueye.protocol[type].create(payload)).finish(),
+    value: blueye.protocol[type]
+      .encode(blueye.protocol[type].create(payload))
+      .finish(),
   },
 });
 
@@ -227,9 +229,7 @@ const createHarness = async (urls, opts = {}) => {
     controls.push({
       key,
       payload:
-        key in blueye.protocol
-          ? blueye.protocol[key].decode(payload)
-          : payload,
+        key in blueye.protocol ? blueye.protocol[key].decode(payload) : payload,
     });
   });
 
@@ -294,7 +294,11 @@ test("BlueyeClient connects and exchanges request, telemetry, and control messag
     await client.sendControl("LightsCtrl", { lights: { value: 0.2 } });
     await delay(50);
 
-    assert.deepEqual(harness.rpcRequests, ["GetTelemetryReq", "GetBatteryReq", "GetTelemetryReq"]);
+    assert.deepEqual(harness.rpcRequests, [
+      "GetTelemetryReq",
+      "GetBatteryReq",
+      "GetTelemetryReq",
+    ]);
     assert.equal(harness.controls.at(-1)?.key, "LightsCtrl");
     assert.ok(
       Math.abs(harness.controls.at(-1)?.payload.lights?.value - 0.2) < 1e-5,
@@ -448,7 +452,10 @@ test("BlueyeClient detects sonar from DroneInfoTel and emits sonar telemetry", a
 
     const [multibeam] = await Promise.all([
       waitForEvent(client, "MultibeamPingTel"),
-      harness.publishSonarTelemetry("MultibeamPingTel", createMultibeamPingTel()),
+      harness.publishSonarTelemetry(
+        "MultibeamPingTel",
+        createMultibeamPingTel(),
+      ),
     ]);
 
     assert.equal(multibeam[0].ping?.deviceId, 13);
