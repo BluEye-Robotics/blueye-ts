@@ -12,8 +12,8 @@ const main = async () => {
       // get latest battery telemetry
       const batteryTel = await client.getTelemetry("BatteryTel");
       console.log("batteryTel:", batteryTel);
-    } catch (error) {
-      // console.error("Error:", error);
+    } catch {
+      // swallow request/telemetry errors and continue with the control demo
     }
 
     // send a control message to change the light intensity to 0.1
