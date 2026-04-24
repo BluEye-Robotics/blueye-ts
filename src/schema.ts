@@ -10,9 +10,6 @@ export const responseSchema = z.object({
 export const telemetrySchema = z.object({
   payload: z.object({
     typeUrl: z.string().transform((val) => val.split(".").at(-1)!),
-    value: z
-      .any()
-      .refine((val) => val instanceof Buffer || val instanceof Uint8Array)
-      .transform((val) => (Buffer.isBuffer(val) ? val : Buffer.from(val))),
+    value: z.instanceof(Uint8Array),
   }),
 });

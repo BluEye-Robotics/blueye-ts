@@ -317,7 +317,7 @@ export class BlueyeClient extends Emitter<Events> {
 
     const protocol = blueye.protocol[req];
     const message = protocol.create(opts);
-    const encoded = protocol.encode(message as any).finish();
+    const encoded = protocol.encode(message as never).finish();
 
     const request = () => {
       return new Promise<z.infer<typeof responseSchema>>((resolve, reject) => {
@@ -425,7 +425,7 @@ export class BlueyeClient extends Emitter<Events> {
 
     const protocol = blueye.protocol[ctrl];
     const message = protocol.create(opts);
-    const encoded = protocol.encode(message as any).finish();
+    const encoded = protocol.encode(message as never).finish();
 
     this.logger.debug("[pub] sending control:", ctrl, message);
     this.pub.send([
