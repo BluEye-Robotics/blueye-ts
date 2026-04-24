@@ -1,3 +1,8 @@
+import {
+  Pub as ZMQPub,
+  Req as ZMQRep,
+  Sub as ZMQSub,
+} from "@blueyerobotics/jszmq";
 import { blueye } from "@blueyerobotics/protocol-definitions";
 import { Buffer } from "buffer";
 import {
@@ -6,16 +11,11 @@ import {
   type LogLevel,
   LogLevels,
 } from "consola";
-import {
-  Pub as ZMQPub,
-  Req as ZMQRep,
-  Sub as ZMQSub,
-} from "@blueyerobotics/jszmq";
+import * as semver from "semver";
 import { Emitter } from "strict-event-emitter";
 import type z from "zod";
 import { AsyncQueue } from "./async-queue";
 import { responseSchema, telemetrySchema } from "./schema";
-import * as semver from "semver";
 
 const DEFAULT_SUB_URL = "ws://192.168.1.101:9985";
 const DEFAULT_RPC_URL = "ws://192.168.1.101:9986";
