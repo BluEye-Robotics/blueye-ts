@@ -4,7 +4,6 @@ import {
   Sub as ZMQSub,
 } from "@blueyerobotics/jszmq";
 import { blueye } from "@blueyerobotics/protocol-definitions";
-import { Buffer } from "buffer";
 import {
   type ConsolaInstance,
   createConsola,
@@ -194,7 +193,7 @@ export class BlueyeClient extends Emitter<Events> {
 
   private handleTelemetryMessage(
     socketName: "sub" | "sonar",
-    topic: Buffer,
+    topic: Uint8Array,
     msg: Uint8Array,
   ) {
     const { key, data } = responseSchema.parse({ key: topic, data: msg });
@@ -328,13 +327,13 @@ export class BlueyeClient extends Emitter<Events> {
 
         this.rpc.once("message", (topic, msg) => {
           clearTimeout(timer);
-          resolve({ key: topic.toString().split(".").at(-1), data: msg });
+          resolve({
+            key: new TextDecoder().decode(topic).split(".").at(-1) ?? "",
+            data: msg,
+          });
         });
 
-        this.rpc.send([
-          Buffer.from(`blueye.protocol.${req}`),
-          Buffer.from(encoded),
-        ]);
+        this.rpc.send([`blueye.protocol.${req}`, encoded]);
       });
     };
 
@@ -428,9 +427,6 @@ export class BlueyeClient extends Emitter<Events> {
     const encoded = protocol.encode(message as never).finish();
 
     this.logger.debug("[pub] sending control:", ctrl, message);
-    this.pub.send([
-      Buffer.from(`blueye.protocol.${ctrl}`),
-      Buffer.from(encoded),
-    ]);
+    this.pub.send([`blueye.protocol.${ctrl}`, encoded]);
   }
 }

@@ -1,6 +1,5 @@
 import { blueye } from "@blueyerobotics/protocol-definitions";
 import { BinaryReader } from "@bufbuild/protobuf/wire";
-import { Buffer } from "buffer";
 import { Gunzip } from "fflate";
 import {
   type DecodedOutput,
@@ -36,7 +35,7 @@ export const parse = async (rawData: Blob, fixTimes = true) => {
 /**
  * Decompress the gzipped binlog data (.bez).
  * @param rawData The compressed binary data to decompress (gzip format).
- * @returns A promise that resolves to the decompressed data as a Buffer.
+ * @returns A promise that resolves to the decompressed data as a Uint8Array.
  */
 export const decompress = async (rawData: Blob) => {
   const gunzip = new Gunzip();
@@ -60,7 +59,15 @@ export const decompress = async (rawData: Blob) => {
     gunzip.push(value);
   }
 
-  return Buffer.concat(chunks);
+  let total = 0;
+  for (const c of chunks) total += c.byteLength;
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const c of chunks) {
+    out.set(c, offset);
+    offset += c.byteLength;
+  }
+  return out;
 };
 
 /**
