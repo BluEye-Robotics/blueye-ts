@@ -6,27 +6,30 @@
     "type": "git",
     "url": "https://github.com/BluEye-Robotics/blueye-ts.git"
   },
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./dist/index.js",
+    "./package.json": "./package.json"
+  },
+  "types": "./dist/index.d.ts",
   "files": [
     "dist"
   ],
   "scripts": {
-    "start": "pnpm build && node dist/example.js",
-    "start:sonar": "pnpm build && node dist/sonar-example.js",
+    "start": "tsx example.ts",
+    "start:sonar": "tsx sonar-example.ts",
     "build": "tsc",
     "check": "biome ci",
-    "test": "pnpm build && node --test --experimental-test-isolation=none --test-concurrency=1 test/**/*.test.js",
-    "test:one": "node --test --test-concurrency=1"
+    "test": "vitest run"
   },
   "keywords": [],
   "author": "Blueye <contact@blueye.no> (https://blueye.no/)",
   "license": "LGPL-3.0-only",
   "dependencies": {
-    "@blueyerobotics/jszmq": "^0.2.0",
+    "@blueyerobotics/jszmq": "^0.3.0",
     "@blueyerobotics/protocol-definitions": "3.2.0-a57cd215",
     "@bufbuild/protobuf": "^2.11.0",
-    "buffer": "^6.0.3",
     "consola": "^3.4.2",
     "fflate": "^0.8.2",
     "semver": "^7.7.4",
@@ -37,6 +40,8 @@
     "@biomejs/biome": "2.3.14",
     "@types/node": "^25.4.0",
     "@types/semver": "^7.7.1",
-    "typescript": "^5.9.3"
+    "tsx": "^4.20.7",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.5"
   }
 }
