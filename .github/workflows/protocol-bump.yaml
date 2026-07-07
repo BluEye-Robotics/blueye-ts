@@ -1,0 +1,79 @@
+name: Protocol Bump
+
+on:
+  repository_dispatch:
+    types: [protocol-update]
+
+concurrency:
+  group: protocol-bump
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    env:
+      PROTOCOL_VERSION: ${{ github.event.client_payload.version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.BLUEYE_PROTOCOL_BUMP_PAT }}
+          lfs: true
+
+      - uses: pnpm/action-setup@v5
+        name: Install pnpm
+        with:
+          version: 10
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: "pnpm"
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Skip if already up to date
+        run: |
+          CURRENT=$(pnpm pkg get dependencies.@blueyerobotics/protocol-definitions | tr -d '"')
+          if [ "$CURRENT" = "$PROTOCOL_VERSION" ]; then
+            echo "Already on ${PROTOCOL_VERSION}, nothing to do"
+            echo "SKIP_BUMP=true" >> "$GITHUB_ENV"
+          fi
+
+      - name: Wait for npm to serve the new version
+        if: env.SKIP_BUMP != 'true'
+        run: |
+          for i in $(seq 1 12); do
+            if npm view "@blueyerobotics/protocol-definitions@${PROTOCOL_VERSION}" version > /dev/null 2>&1; then
+              exit 0
+            fi
+            echo "Version ${PROTOCOL_VERSION} not on npm yet, retrying in 10s (${i}/12)"
+            sleep 10
+          done
+          echo "Version ${PROTOCOL_VERSION} never appeared on npm"
+          exit 1
+
+      - if: env.SKIP_BUMP != 'true'
+        run: pnpm install
+      - if: env.SKIP_BUMP != 'true'
+        run: pnpm add "@blueyerobotics/protocol-definitions@${PROTOCOL_VERSION}" --save-exact
+      - if: env.SKIP_BUMP != 'true'
+        run: pnpm check
+      - if: env.SKIP_BUMP != 'true'
+        run: pnpm build
+      - if: env.SKIP_BUMP != 'true'
+        run: pnpm test
+
+      - name: Commit, tag and release
+        if: env.SKIP_BUMP != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.BLUEYE_PROTOCOL_BUMP_PAT }}
+        run: |
+          pnpm version patch --no-git-tag-version
+          NEW_VERSION=$(pnpm pkg get version | tr -d '"')
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "Bump protocol-definitions to ${PROTOCOL_VERSION} and version to ${NEW_VERSION}"
+          git tag "v${NEW_VERSION}"
+          git push origin main "v${NEW_VERSION}"
+          gh release create "v${NEW_VERSION}" --generate-notes
