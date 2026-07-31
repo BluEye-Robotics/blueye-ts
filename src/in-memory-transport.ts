@@ -92,6 +92,16 @@ export class InMemoryEndpoint {
     this.hub.dropEndpoint(this.url);
   }
 
+  /**
+   * Simulate a silently-dead link (tether/radio drop with no TCP FIN/RST):
+   * the endpoint stops delivering in either direction, but connected sockets
+   * receive NO "lost" event and continue to believe they are attached.
+   */
+  sever() {
+    this.closed = true;
+    this.hub.severEndpoint(this.url);
+  }
+
   deliver(frames: Uint8Array[], reply: InMemoryReply) {
     for (const handler of this.handlers) {
       handler(frames, reply);
@@ -137,6 +147,18 @@ class InMemorySocket implements TransportSocket {
       endpoint?.deliver(encoded, (reply) => {
         this.emitMessage(reply.map(encodeFrame));
       });
+    }
+  }
+
+  dropConnection() {
+    if (this.closed) return;
+    for (const url of [...this.attachedUrls]) {
+      this.detach(url);
+    }
+    // Mimic the transport's automatic reconnection: if the endpoint is
+    // still listening, the socket re-attaches right after the loss.
+    for (const url of this.wantedUrls) {
+      this.hub.tryAttach(this, url);
     }
   }
 
@@ -249,6 +271,13 @@ export class InMemoryTransport implements Transport {
     }
   }
 
+  /** Sever every endpoint silently — simulates a dead link with no close event. */
+  severAll() {
+    for (const endpoint of [...this.endpoints.values()]) {
+      endpoint.sever();
+    }
+  }
+
   tryAttach(socket: InMemorySocket, url: string) {
     if (this.endpoints.has(url) && socket.wants(url)) {
       socket.attach(url);
@@ -260,6 +289,12 @@ export class InMemoryTransport implements Transport {
     for (const socket of this.sockets) {
       socket.detach(url);
     }
+  }
+
+  severEndpoint(url: string) {
+    // Silent: the endpoint disappears but sockets are not detached and get
+    // no "lost" — they keep believing the link is up.
+    this.endpoints.delete(url);
   }
 
   removeSocket(socket: InMemorySocket) {

@@ -313,6 +313,41 @@ describe("jszmq transport adapter", () => {
     }
   });
 
+  it("watchdog drops a stale link and reconnects through the live server", async () => {
+    const urls = await createUrls();
+    const harness = await createHarness(urls);
+    const client = new BlueyeClient({
+      ...urls,
+      reconnectInterval: 50,
+      timeout: 500,
+      stalenessTimeout: 300,
+    });
+
+    try {
+      client.connect();
+      await waitForState(client, "connected");
+
+      // Arm the watchdog with one real telemetry message
+      const firstTel = waitForEvent(client, "BatteryTel");
+      await harness.publishTelemetry("BatteryTel", createBatteryTel());
+      await firstTel;
+
+      // The server stays connected but stops publishing — the watchdog must
+      // force-drop the WebSockets, which emits "connecting"
+      await waitForEvent(client, "connecting", 3_000);
+
+      // The server is still alive, so the reconnect loop restores the
+      // session — including the SUB resubscription — without our help
+      await waitForState(client, "connected", 3_000);
+
+      const batteryRep = await client.sendRequest("GetBatteryReq");
+      assertBattery(batteryRep!.battery);
+    } finally {
+      client.close();
+      await harness.close();
+    }
+  });
+
   it("recovers the REQ socket after a request dies with the server", async () => {
     const urls = await createUrls();
     let harness = await createHarness(urls, { silentRpc: true });

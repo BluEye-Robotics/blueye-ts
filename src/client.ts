@@ -57,6 +57,7 @@ type Options = Partial<{
   sonarUrl: string;
   timeout: number;
   reconnectInterval: number;
+  stalenessTimeout: number;
   logLevel: LogLevel;
   autoConnect: boolean;
   transport: Transport;
@@ -65,6 +66,7 @@ type Options = Partial<{
 export class BlueyeClient extends Emitter<Events> {
   public timeout: number;
   public reconnectInterval: number;
+  public stalenessTimeout: number;
 
   private subUrl: string;
   private rpcUrl: string;
@@ -79,6 +81,8 @@ export class BlueyeClient extends Emitter<Events> {
   private logger: ConsolaInstance;
   private tracker = new ConnectionTracker();
   private sonarIncompatibilityWarned = false;
+  private lastSubMessageAt: number | null = null;
+  private stalenessTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor({
     subUrl = DEFAULT_SUB_URL,
@@ -87,6 +91,7 @@ export class BlueyeClient extends Emitter<Events> {
     sonarUrl = DEFAULT_SONAR_URL,
     timeout = 2000,
     reconnectInterval = 2000,
+    stalenessTimeout = 5000,
     logLevel = LogLevels.info,
     autoConnect = false,
     transport = new JszmqTransport(),
@@ -95,6 +100,7 @@ export class BlueyeClient extends Emitter<Events> {
 
     this.timeout = timeout;
     this.reconnectInterval = reconnectInterval;
+    this.stalenessTimeout = stalenessTimeout;
 
     this.subUrl = subUrl;
     this.rpcUrl = rpcUrl;
@@ -118,6 +124,7 @@ export class BlueyeClient extends Emitter<Events> {
     this.bindSocketLifecycle("sonar", this.sonarSub);
 
     this.sub.on("message", (topic, msg) => {
+      this.lastSubMessageAt = Date.now();
       this.handleTelemetryMessage("sub", topic, msg);
     });
 
@@ -190,6 +197,46 @@ export class BlueyeClient extends Emitter<Events> {
     }
   }
 
+  private startStalenessWatchdog() {
+    this.stopStalenessWatchdog();
+    if (this.stalenessTimeout <= 0) return;
+
+    const checkInterval = Math.max(100, Math.floor(this.stalenessTimeout / 4));
+    this.stalenessTimer = setInterval(() => {
+      this.checkTelemetryStaleness();
+    }, checkInterval);
+  }
+
+  private stopStalenessWatchdog() {
+    if (this.stalenessTimer != null) {
+      clearInterval(this.stalenessTimer);
+      this.stalenessTimer = null;
+    }
+  }
+
+  private checkTelemetryStaleness() {
+    // Only armed while connected AND after telemetry has actually flowed —
+    // a connection that never produced telemetry is not judged stale.
+    if (this.state !== "connected" || this.lastSubMessageAt == null) return;
+
+    const silentFor = Date.now() - this.lastSubMessageAt;
+    if (silentFor <= this.stalenessTimeout) return;
+
+    this.logger.warn(
+      `[watchdog] no telemetry for ${silentFor}ms; dropping connections to force a reconnect`,
+    );
+    // Re-arm only once telemetry flows again, so a live-but-quiet server
+    // doesn't get dropped in a loop.
+    this.lastSubMessageAt = null;
+
+    // Convert the silent failure into the explicit loss the state machine
+    // already handles: sockets emit "lost" and their reconnect loop runs.
+    this.sub.dropConnection();
+    this.rpc.dropConnection();
+    this.pub.dropConnection();
+    this.sonarSub.dropConnection();
+  }
+
   // Bound so disconnect() can remove it if the connection never came up
   private primeSonarDetection = async () => {
     try {
@@ -236,6 +283,8 @@ export class BlueyeClient extends Emitter<Events> {
     }
 
     this.sonarIncompatibilityWarned = false;
+    this.lastSubMessageAt = null;
+    this.startStalenessWatchdog();
     this.once("connected", this.primeSonarDetection);
 
     this.sub.setReconnectInterval(this.reconnectInterval);
@@ -258,6 +307,7 @@ export class BlueyeClient extends Emitter<Events> {
       return;
     }
 
+    this.stopStalenessWatchdog();
     this.off("connected", this.primeSonarDetection);
 
     this.sub.unsubscribe("");
@@ -279,6 +329,7 @@ export class BlueyeClient extends Emitter<Events> {
       this.disconnect();
     }
 
+    this.stopStalenessWatchdog();
     this.sub.close();
     this.rpc.close();
     this.pub.close();

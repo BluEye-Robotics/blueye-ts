@@ -233,6 +233,10 @@ const createHarness = (opts: HarnessOpts = {}) => {
     close() {
       transport.closeAll();
     },
+    // Simulate a tether/radio drop: the link dies but no close event arrives
+    sever() {
+      transport.severAll();
+    },
     open,
     openSonar,
   };
@@ -511,6 +515,82 @@ describe("BlueyeClient", () => {
     harness.open();
     await delay(50);
     expect(client.state).toBe("disconnected");
+  });
+});
+
+describe("telemetry staleness watchdog", () => {
+  it("converts a silent link failure into connecting, then recovers", async () => {
+    const harness = createHarness();
+    const client = createClient(harness, { stalenessTimeout: 200 });
+
+    client.connect();
+    await waitForState(client, "connected");
+
+    // Arm the watchdog: telemetry must flow at least once
+    const firstTel = waitForEvent(client, "BatteryTel");
+    harness.publishTelemetry("BatteryTel", createBatteryTel());
+    await firstTel;
+
+    // Tether drop: the link dies silently — no close event reaches the sockets
+    harness.sever();
+    await waitForEvent(client, "connecting");
+    expect(client.state).toBe("connecting");
+
+    // Link returns: the normal reconnect machinery restores the session
+    harness.open();
+    await waitForState(client, "connected");
+
+    const telAgain = waitForEvent(client, "BatteryTel");
+    harness.publishTelemetry("BatteryTel", createBatteryTel());
+    await telAgain;
+
+    client.close();
+  });
+
+  it("does nothing when disabled via stalenessTimeout: 0", async () => {
+    const harness = createHarness();
+    const client = createClient(harness, { stalenessTimeout: 0 });
+
+    client.connect();
+    await waitForState(client, "connected");
+
+    const firstTel = waitForEvent(client, "BatteryTel");
+    harness.publishTelemetry("BatteryTel", createBatteryTel());
+    await firstTel;
+
+    let wentConnecting = 0;
+    client.on("connecting", () => {
+      wentConnecting++;
+    });
+
+    harness.sever();
+    await delay(600);
+
+    expect(wentConnecting).toBe(0);
+    expect(client.state).toBe("connected");
+
+    client.close();
+  });
+
+  it("never fires before the first telemetry message arrives", async () => {
+    const harness = createHarness();
+    const client = createClient(harness, { stalenessTimeout: 150 });
+
+    client.connect();
+    await waitForState(client, "connected");
+
+    // No SUB telemetry is ever published — the watchdog must stay disarmed
+    let wentConnecting = 0;
+    client.on("connecting", () => {
+      wentConnecting++;
+    });
+
+    await delay(600);
+
+    expect(wentConnecting).toBe(0);
+    expect(client.state).toBe("connected");
+
+    client.close();
   });
 });
 

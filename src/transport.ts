@@ -18,6 +18,12 @@ export type TransportSocket = {
   connect(url: string): void;
   disconnect(url: string): void;
   close(): void;
+  /**
+   * Force-drop the live connection(s) without forgetting the endpoints:
+   * emits "lost" and lets the transport's normal reconnect machinery try to
+   * re-establish. Used to convert silently-dead links into explicit loss.
+   */
+  dropConnection(): void;
   send(frames: TransportFrame[]): void;
   subscribe(topic: string): void;
   unsubscribe(topic: string): void;
@@ -65,6 +71,20 @@ class JszmqSocket implements TransportSocket {
 
   close() {
     this.socket.close();
+  }
+
+  dropConnection() {
+    // Close each endpoint's raw WebSocket while leaving the endpoint
+    // registered: jszmq treats an unexpected close as a loss — it emits
+    // "lost" and schedules its own reconnect (webSocketEndpoint.onClose).
+    // endpoint.close()/disconnect(url) would instead terminate the endpoint
+    // permanently, which is exactly what we don't want here.
+    const { endpoints } = this.socket as unknown as {
+      endpoints?: { socket?: { close(): void } }[];
+    };
+    for (const endpoint of endpoints ?? []) {
+      endpoint.socket?.close();
+    }
   }
 
   send(frames: TransportFrame[]) {

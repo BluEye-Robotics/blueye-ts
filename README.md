@@ -58,6 +58,16 @@ The derived `client.state` reflects the aggregate of the core sockets (`sub`, `r
 
 All state events — global and per-socket — are edge-triggered: they fire exactly once per actual change. If the client loses one or more sockets after being connected, the derived state moves back to `connecting` (with a `connecting` event). `sendRequest()` and `sendControl()` reject unless the client is in the `connected` state.
 
+### Telemetry staleness watchdog
+
+A dead link does not always produce a close event — a tether or radio drop can leave the sockets looking connected while telemetry silently freezes, until TCP retransmission gives up minutes later. Because the drone publishes telemetry continuously (e.g. `DroneTimeTel` at 1 Hz), the client watches for it: if no message arrives on the telemetry socket for `stalenessTimeout` milliseconds (default `5000`) while `connected`, the client force-drops its connections. This converts the silent failure into the normal loss path — consumers see the usual `connecting` event, and the built-in reconnect loop restores the session when the link returns.
+
+The watchdog only arms after the first telemetry message of a connection (a connection that never produced telemetry is not judged stale), watches the main telemetry socket only (sonar can be legitimately quiet), and disarms on `disconnect()`. Set `stalenessTimeout: 0` to disable it:
+
+```ts
+const client = new BlueyeClient({ stalenessTimeout: 0 }); // no watchdog
+```
+
 ## Transports
 
 `BlueyeClient` talks to its sockets through a small transport interface. The default adapter uses [jszmq](https://github.com/BluEye-Robotics/jszmq) over WebSockets; an in-memory adapter ships alongside it for tests, so application code using `BlueyeClient` can be exercised without a drone or any network:
