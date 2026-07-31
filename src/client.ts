@@ -7,14 +7,13 @@ import {
 } from "consola";
 import * as semver from "semver";
 import { Emitter } from "strict-event-emitter";
-import type z from "zod";
-import { AsyncQueue } from "./async-queue";
 import {
   type ConnectionState,
   ConnectionTracker,
   type ConnectionTransition,
   type SocketName,
 } from "./connection-state";
+import { RequestPipeline } from "./request-pipeline";
 import { responseSchema, telemetrySchema } from "./schema";
 import {
   JszmqTransport,
@@ -99,7 +98,7 @@ export class BlueyeClient extends Emitter<Events> {
   private rpc: TransportSocket;
   private pub: TransportSocket;
   private sonarSub: TransportSocket;
-  private queue: AsyncQueue;
+  private pipeline: RequestPipeline;
   private logger: ConsolaInstance;
   private tracker = new ConnectionTracker();
   private sonarIncompatibilityWarned = false;
@@ -130,7 +129,7 @@ export class BlueyeClient extends Emitter<Events> {
     this.pub = transport.createSocket("pub");
     this.sonarSub = transport.createSocket("sub");
 
-    this.queue = new AsyncQueue();
+    this.pipeline = new RequestPipeline(this.rpc);
     this.logger = createConsola({
       level: logLevel,
       formatOptions: { colors: true, compact: false },
@@ -327,26 +326,11 @@ export class BlueyeClient extends Emitter<Events> {
     const message = protocol.create(opts);
     const encoded = protocol.encode(message as never).finish();
 
-    const request = () => {
-      return new Promise<z.infer<typeof responseSchema>>((resolve, reject) => {
-        const timer = setTimeout(
-          () => reject(new Error("[rpc] request timed out")),
-          this.timeout,
-        );
-
-        this.rpc.once("message", (topic, msg) => {
-          clearTimeout(timer);
-          resolve({
-            key: new TextDecoder().decode(topic).split(".").at(-1) ?? "",
-            data: msg,
-          });
-        });
-
-        this.rpc.send([`blueye.protocol.${req}`, encoded]);
-      });
-    };
-
-    const { key, data } = await this.queue.enqueue(request);
+    const [topic, data] = await this.pipeline.request(
+      [`blueye.protocol.${req}`, encoded],
+      this.timeout,
+    );
+    const key = new TextDecoder().decode(topic).split(".").at(-1) ?? "";
 
     if (key === "Empty") {
       return null;

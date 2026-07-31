@@ -43,7 +43,17 @@ export type Transport = {
 type JszmqSocketInstance = JszmqSub | JszmqReq | JszmqPub;
 
 class JszmqSocket implements TransportSocket {
-  constructor(private socket: JszmqSocketInstance) {}
+  constructor(private socket: JszmqSocketInstance) {
+    // A jszmq REQ socket is lockstep: once a request is sent it refuses to
+    // send another until the reply arrives, and that flag survives connection
+    // loss — wedging the socket forever if the server died mid-request.
+    // Losing the connection means the reply can no longer arrive, so reset.
+    if (socket instanceof JszmqReq) {
+      socket.on("lost", () => {
+        socket.receivingReply = false;
+      });
+    }
+  }
 
   connect(url: string) {
     this.socket.connect(url);

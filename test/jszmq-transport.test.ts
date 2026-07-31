@@ -141,7 +141,15 @@ const defaultTelemetryPayloads: Record<string, () => any> = {
   DroneInfoTel: createDroneInfoTel,
 };
 
-const createHarness = async (urls: Awaited<ReturnType<typeof createUrls>>) => {
+type HarnessOpts = {
+  // Record RPC requests but never respond — simulates a server dying mid-request
+  silentRpc?: boolean;
+};
+
+const createHarness = async (
+  urls: Awaited<ReturnType<typeof createUrls>>,
+  opts: HarnessOpts = {},
+) => {
   const telemetry = new jsmq.XPub();
   const rpc = new jsmq.Rep();
   const control = new jsmq.Sub();
@@ -168,6 +176,10 @@ const createHarness = async (urls: Awaited<ReturnType<typeof createUrls>>) => {
   rpc.on("message", (topic: Uint8Array, payload: Uint8Array) => {
     const key = topicName(topic);
     rpcRequests.push(key);
+
+    if (opts.silentRpc) {
+      return;
+    }
 
     if (key === "GetBatteryReq") {
       rpc.send([
@@ -289,6 +301,41 @@ describe("jszmq transport adapter", () => {
       await harness.close();
       await waitForState(client, "connecting", 3_000);
       expect(client.state).toBe("connecting");
+
+      harness = await createHarness(urls);
+      await waitForState(client, "connected", 3_000);
+
+      const batteryRep = await client.sendRequest("GetBatteryReq");
+      assertBattery(batteryRep!.battery);
+    } finally {
+      client.close();
+      await harness.close();
+    }
+  });
+
+  it("recovers the REQ socket after a request dies with the server", async () => {
+    const urls = await createUrls();
+    let harness = await createHarness(urls, { silentRpc: true });
+    const client = new BlueyeClient({
+      ...urls,
+      reconnectInterval: 50,
+      timeout: 200,
+    });
+
+    try {
+      client.connect();
+      await waitForState(client, "connected");
+
+      // The server swallows the request — the client times out while the
+      // jszmq REQ socket still owes a reply (lockstep engaged)
+      await expect(client.sendRequest("GetBatteryReq")).rejects.toThrow(
+        /request timed out|connection lost/,
+      );
+
+      // Server dies and comes back responsive; the lost connection must
+      // reset the REQ lockstep or the socket is wedged forever
+      await harness.close();
+      await waitForState(client, "connecting", 3_000);
 
       harness = await createHarness(urls);
       await waitForState(client, "connected", 3_000);
