@@ -155,6 +155,10 @@ export class BlueyeClient extends Emitter<Events> {
         this.logger.info(`[${transition.name}] ${transition.state}`);
         this.emit(`${transition.name}-${transition.state}`);
       } else {
+        // Any client-state change invalidates the staleness baseline: after
+        // a loss and reconnect the watchdog must only judge telemetry
+        // received on the new connection, never a pre-outage timestamp.
+        this.lastSubMessageAt = null;
         this.logger.info(`[client] ${transition.state}`);
         this.emit(transition.state);
       }

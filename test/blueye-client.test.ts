@@ -547,6 +547,47 @@ describe("telemetry staleness watchdog", () => {
     client.close();
   });
 
+  it("does not flap after a close-based outage longer than the window", async () => {
+    const harness = createHarness();
+    const client = createClient(harness, { stalenessTimeout: 150 });
+
+    client.connect();
+    await waitForState(client, "connected");
+
+    // Arm the watchdog with real telemetry
+    const firstTel = waitForEvent(client, "BatteryTel");
+    harness.publishTelemetry("BatteryTel", createBatteryTel());
+    await firstTel;
+
+    // Close-based loss (drone reboot): sockets get a proper close event
+    harness.close();
+    await waitForState(client, "connecting");
+
+    // Stay down for well over the staleness window
+    await delay(400);
+
+    // Server returns; the pre-outage timestamp must not be judged against
+    // the new connection before its first telemetry message arrives
+    harness.open();
+    await waitForState(client, "connected");
+
+    let spuriousDrops = 0;
+    client.on("connecting", () => {
+      spuriousDrops++;
+    });
+
+    await delay(500);
+    expect(spuriousDrops).toBe(0);
+    expect(client.state).toBe("connected");
+
+    // Telemetry re-arms the watchdog on the new connection as usual
+    const telAgain = waitForEvent(client, "BatteryTel");
+    harness.publishTelemetry("BatteryTel", createBatteryTel());
+    await telAgain;
+
+    client.close();
+  });
+
   it("does nothing when disabled via stalenessTimeout: 0", async () => {
     const harness = createHarness();
     const client = createClient(harness, { stalenessTimeout: 0 });
