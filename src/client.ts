@@ -4,7 +4,6 @@ import {
   type LogLevel,
   LogLevels,
 } from "consola";
-import * as semver from "semver";
 import { Emitter } from "strict-event-emitter";
 import {
   type ConnectionState,
@@ -29,6 +28,7 @@ import {
   topicToKey,
 } from "./protocol";
 import { RequestPipeline } from "./request-pipeline";
+import { detectSonar } from "./sonar-device";
 import {
   JszmqTransport,
   type Transport,
@@ -41,8 +41,6 @@ const DEFAULT_SUB_URL = "ws://192.168.1.101:9985";
 const DEFAULT_RPC_URL = "ws://192.168.1.101:9986";
 const DEFAULT_PUB_URL = "ws://192.168.1.101:9987";
 const DEFAULT_SONAR_URL = "ws://192.168.1.101:9988";
-
-export const MULTIBEAM_DEVICE_IDS = [13, 16, 18, 20, 29, 30, 41, 42];
 
 export type Events = {
   [K in ConnectionState]: [];
@@ -63,13 +61,6 @@ type Options = Partial<{
   autoConnect: boolean;
   transport: Transport;
 }>;
-
-const hasSonarEndpoint = (version: string): boolean => {
-  const coercedVersion = semver.coerce(version);
-  return coercedVersion
-    ? semver.satisfies(coercedVersion, ">=4.7.0") || version.endsWith("-dev")
-    : false;
-};
 
 export class BlueyeClient extends Emitter<Events> {
   public timeout: number;
@@ -215,30 +206,27 @@ export class BlueyeClient extends Emitter<Events> {
   private evaluateSonarDetection(msg: DecodedTelOutput<"DroneInfoTel">) {
     if (!this.tracker.intended || this.tracker.isSonarRequired) return;
 
-    const version = msg.droneInfo?.blunuxVersion;
+    const detection = detectSonar(msg);
 
-    if (!hasSonarEndpoint(version ?? "")) {
-      if (!this.sonarIncompatibilityWarned) {
+    if (!detection.detected) {
+      if (
+        detection.reason === "incompatible-firmware" &&
+        !this.sonarIncompatibilityWarned
+      ) {
         this.sonarIncompatibilityWarned = true;
         this.logger.warn(
-          `[sonar] incompatible Blunux version detected in DroneInfoTel: ${version}; sonar telemetry may not be available`,
+          `[sonar] incompatible Blunux version detected in DroneInfoTel: ${detection.version}; sonar telemetry may not be available`,
         );
       }
       return;
     }
 
-    const devices = [
-      ...(msg.droneInfo?.gp?.gp1?.deviceList?.devices ?? []),
-      ...(msg.droneInfo?.gp?.gp2?.deviceList?.devices ?? []),
-      ...(msg.droneInfo?.gp?.gp3?.deviceList?.devices ?? []),
-    ].map((device) => device.deviceId);
-
-    if (devices.some((deviceId) => MULTIBEAM_DEVICE_IDS.includes(deviceId))) {
-      this.logger.info("[sonar] multibeam device detected in DroneInfoTel");
-      const transitions = this.tracker.sonarDetected();
-      this.sonarSub.connect(this.sonarUrl);
-      this.applyTransitions(transitions);
-    }
+    this.logger.info(
+      `[sonar] multibeam device detected in DroneInfoTel (deviceId: ${detection.deviceId})`,
+    );
+    const transitions = this.tracker.sonarDetected();
+    this.sonarSub.connect(this.sonarUrl);
+    this.applyTransitions(transitions);
   }
 
   connect() {
