@@ -3,11 +3,14 @@ import { BinaryReader } from "@bufbuild/protobuf/wire";
 import { Gunzip } from "fflate";
 import {
   type DecodedOutput,
+  decodeMessage,
   isInProtocol,
   type Protocol,
   type ProtocolKey,
   type ProtocolType,
-} from "./client";
+  protocolTypeOf,
+  topicToKey,
+} from "./protocol";
 
 export type Message = {
   [K in ProtocolKey]: {
@@ -98,44 +101,40 @@ export const parseMessages = (decompressed: Uint8Array, fixTimes = true) => {
       length,
     );
 
-    const key = msg.payload?.typeUrl.split(".").at(-1) as
-      | ProtocolKey
-      | undefined;
+    if (msg.payload == null) {
+      console.warn("Missing payload in BinlogRecord");
+      continue;
+    }
 
-    if (!key || !isInProtocol(key)) {
+    const key = topicToKey(msg.payload.typeUrl) as ProtocolKey;
+
+    if (!isInProtocol(key)) {
       console.warn(`Unknown protocol key: ${key}`);
       continue;
     }
 
-    if (msg.payload == null) {
-      console.warn(`Missing payload for key: ${key}`);
-      continue;
-    }
-
-    const data = blueye.protocol[key].decode(msg.payload.value);
+    const data = decodeMessage(key, msg.payload.value);
     let innerData: object | undefined;
 
     if (key === "GetTelemetryRep") {
       const telRep = data as DecodedOutput<"GetTelemetryReq">;
-      const innerKey = telRep.payload?.typeUrl.split(".").at(-1) as
-        | ProtocolKey
-        | undefined;
 
-      if (!innerKey || !isInProtocol(innerKey)) {
+      if (telRep.payload == null) {
+        console.warn("Missing inner payload in GetTelemetryRep");
+        continue;
+      }
+
+      const innerKey = topicToKey(telRep.payload.typeUrl) as ProtocolKey;
+
+      if (!isInProtocol(innerKey)) {
         console.warn(`Unknown inner protocol key: ${innerKey}`);
         continue;
       }
 
-      innerData = telRep.payload
-        ? blueye.protocol[innerKey].decode(telRep.payload.value)
-        : undefined;
+      innerData = decodeMessage(innerKey, telRep.payload.value);
     }
 
-    let type: ProtocolType = "Tel";
-
-    if (key.endsWith("Ctrl")) type = "Ctrl";
-    else if (key.endsWith("Rep")) type = "Rep";
-    else if (key.endsWith("Req")) type = "Req";
+    const type: ProtocolType = protocolTypeOf(key);
 
     messages.push({
       monotonicTime: msg.clockMonotonic?.getTime() ?? 0,

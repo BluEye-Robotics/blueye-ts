@@ -1,4 +1,3 @@
-import { blueye } from "@blueyerobotics/protocol-definitions";
 import {
   type ConsolaInstance,
   createConsola,
@@ -13,8 +12,23 @@ import {
   type ConnectionTransition,
   type SocketName,
 } from "./connection-state";
+import {
+  type CreateArgs,
+  type Ctrl,
+  type DecodedOutput,
+  type DecodedTelOutput,
+  decodeMessage,
+  encodeMessage,
+  isCtrl,
+  isRep,
+  isReq,
+  isTel,
+  keyToTopic,
+  type Req,
+  type Tel,
+  topicToKey,
+} from "./protocol";
 import { RequestPipeline } from "./request-pipeline";
-import { responseSchema, telemetrySchema } from "./schema";
 import {
   JszmqTransport,
   type Transport,
@@ -30,40 +44,12 @@ const DEFAULT_SONAR_URL = "ws://192.168.1.101:9988";
 
 export const MULTIBEAM_DEVICE_IDS = [13, 16, 18, 20, 29, 30, 41, 42];
 
-export type Protocol = typeof blueye.protocol;
-export type ProtocolType = "Req" | "Rep" | "Tel" | "Ctrl";
-export type ProtocolKey = Extract<keyof Protocol, `${string}${ProtocolType}`>;
-
-export type Req = keyof Pick<Protocol, Extract<ProtocolKey, `${string}Req`>>;
-export type Rep = keyof Pick<Protocol, Extract<ProtocolKey, `${string}Rep`>>;
-export type Tel = keyof Pick<Protocol, Extract<ProtocolKey, `${string}Tel`>>;
-export type Ctrl = keyof Pick<Protocol, Extract<ProtocolKey, `${string}Ctrl`>>;
-
-export type ReqToRep<T extends Req> = T extends `${infer Prefix}Req`
-  ? `${Prefix}Rep` extends ProtocolKey
-    ? Protocol[`${Prefix}Rep`]
-    : never
-  : never;
-
-export type MsgHandler<T extends Req | Ctrl> = Protocol[T];
-export type CreateArgs<T extends Req | Ctrl> = Parameters<
-  MsgHandler<T>["create"]
->[0];
-export type DecodedOutput<T extends Req> = ReturnType<ReqToRep<T>["decode"]>;
-export type DecodedTelOutput<T extends Tel> = ReturnType<Protocol[T]["decode"]>;
-
 export type Events = {
   [K in ConnectionState]: [];
 } & {
   [K in `${SocketName}-${ConnectionState}`]: [];
 } & {
   [K in Tel]: [DecodedTelOutput<K>];
-};
-
-export const isInProtocol = (
-  key: string,
-): key is keyof typeof blueye.protocol => {
-  return key in blueye.protocol;
 };
 
 type Options = Partial<{
@@ -182,18 +168,17 @@ export class BlueyeClient extends Emitter<Events> {
     topic: Uint8Array,
     msg: Uint8Array,
   ) {
-    const { key, data } = responseSchema.parse({ key: topic, data: msg });
+    const key = topicToKey(topic);
 
-    if (!isInProtocol(key) || !key.endsWith("Tel")) {
+    if (!isTel(key)) {
       this.logger.warn(`[${socketName}] unknown protocol:`, key);
       return;
     }
 
-    const protocol = blueye.protocol[key as Tel];
-    const message = protocol.decode(data) as DecodedTelOutput<Tel>;
+    const message = decodeMessage(key, msg);
 
     this.logger.verbose(`[${socketName}] message:`, key, message);
-    this.emit(key as Tel, message as never);
+    this.emit(key, message as never);
   }
 
   private bindSocketLifecycle(name: SocketName, socket: TransportSocket) {
@@ -318,30 +303,27 @@ export class BlueyeClient extends Emitter<Events> {
   ): Promise<DecodedOutput<T> | null> {
     this.ensureConnected("rpc");
 
-    if (!isInProtocol(req) || !req.endsWith("Req")) {
+    if (!isReq(req)) {
       throw new Error(`[rpc] unknown protocol: ${req}`);
     }
 
-    const protocol = blueye.protocol[req];
-    const message = protocol.create(opts);
-    const encoded = protocol.encode(message as never).finish();
+    const encoded = encodeMessage(req, opts);
 
     const [topic, data] = await this.pipeline.request(
-      [`blueye.protocol.${req}`, encoded],
+      [keyToTopic(req), encoded],
       this.timeout,
     );
-    const key = new TextDecoder().decode(topic).split(".").at(-1) ?? "";
+    const key = topicToKey(topic);
 
     if (key === "Empty") {
       return null;
     }
 
-    if (!isInProtocol(key) || !key.endsWith("Rep")) {
+    if (!isRep(key)) {
       throw new Error(`[rpc] unknown response protocol: ${key}`);
     }
 
-    const rep = blueye.protocol[key as T] as ReqToRep<T>;
-    const result = rep.decode(data) as DecodedOutput<T>;
+    const result = decodeMessage(key, data) as DecodedOutput<T>;
 
     this.logger.debug("[rpc] decoded:", result);
 
@@ -357,15 +339,19 @@ export class BlueyeClient extends Emitter<Events> {
       throw new Error(`[rpc] no response for telemetry request: ${type}`);
     }
 
-    const { payload } = telemetrySchema.parse(response);
-    const { typeUrl, value } = payload;
-
-    if (!isInProtocol(typeUrl) || !typeUrl.endsWith("Tel")) {
-      throw new Error(`[rpc] unknown telemetry typeUrl: ${typeUrl}`);
+    if (!response.payload) {
+      throw new Error(`[rpc] no cached telemetry available for: ${type}`);
     }
 
-    const result = (blueye.protocol[typeUrl] as Protocol[T]).decode(
-      value,
+    const key = topicToKey(response.payload.typeUrl);
+
+    if (!isTel(key)) {
+      throw new Error(`[rpc] unknown telemetry typeUrl: ${key}`);
+    }
+
+    const result = decodeMessage(
+      key,
+      response.payload.value,
     ) as DecodedTelOutput<T>;
 
     this.logger.debug("[rpc] result:", result);
@@ -411,15 +397,13 @@ export class BlueyeClient extends Emitter<Events> {
   async sendControl<T extends Ctrl>(ctrl: T, opts: CreateArgs<T> = {}) {
     this.ensureConnected("pub");
 
-    if (!isInProtocol(ctrl) || !ctrl.endsWith("Ctrl")) {
+    if (!isCtrl(ctrl)) {
       throw new Error(`[pub] unknown protocol: ${ctrl}`);
     }
 
-    const protocol = blueye.protocol[ctrl];
-    const message = protocol.create(opts);
-    const encoded = protocol.encode(message as never).finish();
+    const encoded = encodeMessage(ctrl, opts);
 
-    this.logger.debug("[pub] sending control:", ctrl, message);
-    this.pub.send([`blueye.protocol.${ctrl}`, encoded]);
+    this.logger.debug("[pub] sending control:", ctrl, opts);
+    this.pub.send([keyToTopic(ctrl), encoded]);
   }
 }
