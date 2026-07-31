@@ -56,7 +56,7 @@ The derived `client.state` reflects the aggregate of the core sockets (`sub`, `r
 - `connecting`: one or more required sockets are not yet ready.
 - `connected`: all required sockets are ready — safe to call `sendRequest()`, `getTelemetry()`, and `sendControl()`.
 
-`client.sonarState` reflects the sonar socket independently. If the client loses one or more sockets after being connected, the derived state moves back to `connecting`. `sendRequest()` and `sendControl()` reject unless the client is in the `connected` state.
+All state events — global and per-socket — are edge-triggered: they fire exactly once per actual change. If the client loses one or more sockets after being connected, the derived state moves back to `connecting` (with a `connecting` event). `sendRequest()` and `sendControl()` reject unless the client is in the `connected` state.
 
 ## Transports
 
@@ -89,6 +89,6 @@ When you are done with a client, call `client.close()` to release the underlying
 
 `BlueyeClient` connects the sonar websocket endpoint at `ws://192.168.1.101:9988` when a supported multibeam device is detected in a `DroneInfoTel` message.
 
-- On `connect()`, the sonar socket subscribes but only connects when a known multibeam device ID is found in the guest-port device list.
-- Once detected, the sonar socket connects and the global `connected` state requires it to be ready.
+- On `connect()`, the sonar socket subscribes but only connects when a known multibeam device ID is found in the guest-port device list. Detection inspects every `DroneInfoTel` — one is requested over RPC when the connection comes up, and any later `DroneInfoTel` arriving over SUB is also considered.
+- Once detected, the sonar socket connects and the global `connected` state requires it to be ready. Detection resets on `disconnect()`; the next connection starts without requiring sonar until it is detected again.
 - Sonar telemetry such as `MultibeamPingTel`, `MultibeamConfigTel`, and `MultibeamDiscoveryTel` is emitted through the same typed event interface as other telemetry messages.

@@ -9,12 +9,20 @@ import * as semver from "semver";
 import { Emitter } from "strict-event-emitter";
 import type z from "zod";
 import { AsyncQueue } from "./async-queue";
+import {
+  type ConnectionState,
+  ConnectionTracker,
+  type ConnectionTransition,
+  type SocketName,
+} from "./connection-state";
 import { responseSchema, telemetrySchema } from "./schema";
 import {
   JszmqTransport,
   type Transport,
   type TransportSocket,
 } from "./transport";
+
+export type { ConnectionState, SocketName } from "./connection-state";
 
 const DEFAULT_SUB_URL = "ws://192.168.1.101:9985";
 const DEFAULT_RPC_URL = "ws://192.168.1.101:9986";
@@ -45,13 +53,10 @@ export type CreateArgs<T extends Req | Ctrl> = Parameters<
 export type DecodedOutput<T extends Req> = ReturnType<ReqToRep<T>["decode"]>;
 export type DecodedTelOutput<T extends Tel> = ReturnType<Protocol[T]["decode"]>;
 
-type State = "connecting" | "connected" | "disconnected";
-export type SocketName = "sub" | "rpc" | "pub" | "sonar";
-
 export type Events = {
-  [K in State]: [];
+  [K in ConnectionState]: [];
 } & {
-  [K in `${SocketName}-${State}`]: [];
+  [K in `${SocketName}-${ConnectionState}`]: [];
 } & {
   [K in Tel]: [DecodedTelOutput<K>];
 };
@@ -96,14 +101,8 @@ export class BlueyeClient extends Emitter<Events> {
   private sonarSub: TransportSocket;
   private queue: AsyncQueue;
   private logger: ConsolaInstance;
-  private shouldBeConnected = false;
-  private isSonarDetected = false;
-  private socketState: Record<SocketName, State> = {
-    sub: "disconnected",
-    rpc: "disconnected",
-    pub: "disconnected",
-    sonar: "disconnected",
-  };
+  private tracker = new ConnectionTracker();
+  private sonarIncompatibilityWarned = false;
 
   constructor({
     subUrl = DEFAULT_SUB_URL,
@@ -150,7 +149,12 @@ export class BlueyeClient extends Emitter<Events> {
       this.handleTelemetryMessage("sonar", topic, msg);
     });
 
-    this.emit(this.state);
+    // Any DroneInfoTel — whether primed via RPC on connect or arriving over
+    // SUB later — can reveal a multibeam sonar.
+    this.on("DroneInfoTel", (msg) => {
+      this.evaluateSonarDetection(msg);
+    });
+
     this.logger.info(`[client] ${this.state}`);
 
     if (autoConnect) {
@@ -158,35 +162,19 @@ export class BlueyeClient extends Emitter<Events> {
     }
   }
 
-  get state(): State {
-    if (!this.shouldBeConnected) return "disconnected";
-    const { sub, rpc, pub } = this.socketState;
-    if (
-      sub === "connected" &&
-      rpc === "connected" &&
-      pub === "connected" &&
-      (this.isSonarDetected ? this.socketState.sonar === "connected" : true)
-    ) {
-      return "connected";
-    }
-    return "connecting";
+  get state(): ConnectionState {
+    return this.tracker.state;
   }
 
-  private updateSocketState(name: SocketName, newState: State) {
-    if (this.socketState[name] === newState) {
-      return;
-    }
-
-    const oldState = this.state;
-
-    this.socketState[name] = newState;
-    this.logger.info(`[${name}] ${newState}`);
-    this.emit(`${name}-${newState}`);
-
-    // If all sockets are connected, emit "connected"
-    this.emit(this.state);
-    if (oldState !== this.state) {
-      this.logger.info(`[client] ${this.state}`);
+  private applyTransitions(transitions: ConnectionTransition[]) {
+    for (const transition of transitions) {
+      if (transition.scope === "socket") {
+        this.logger.info(`[${transition.name}] ${transition.state}`);
+        this.emit(`${transition.name}-${transition.state}`);
+      } else {
+        this.logger.info(`[client] ${transition.state}`);
+        this.emit(transition.state);
+      }
     }
   }
 
@@ -211,67 +199,79 @@ export class BlueyeClient extends Emitter<Events> {
 
   private bindSocketLifecycle(name: SocketName, socket: TransportSocket) {
     socket.on("ready", () => {
-      if (!this.shouldBeConnected) return;
-      this.updateSocketState(name, "connected");
+      this.applyTransitions(this.tracker.socketReady(name));
     });
 
     socket.on("lost", () => {
-      if (!this.shouldBeConnected) return;
-      this.updateSocketState(name, "connecting");
+      this.applyTransitions(this.tracker.socketLost(name));
     });
   }
 
   private ensureConnected(operation: "rpc" | "pub") {
-    if (this.socketState[operation] !== "connected") {
+    if (this.state !== "connected") {
       throw new Error(
         `[client] cannot send ${operation} while ${this.state}; call connect() and wait for "connected"`,
       );
     }
   }
 
+  // Bound so disconnect() can remove it if the connection never came up
+  private primeSonarDetection = async () => {
+    try {
+      const msg = await this.getTelemetry("DroneInfoTel");
+      this.evaluateSonarDetection(msg);
+    } catch (error) {
+      this.logger.trace(
+        "[sonar] failed to get DroneInfoTel via RPC; waiting for SUB telemetry:",
+        error,
+      );
+    }
+  };
+
+  private evaluateSonarDetection(msg: DecodedTelOutput<"DroneInfoTel">) {
+    if (!this.tracker.intended || this.tracker.isSonarRequired) return;
+
+    const version = msg.droneInfo?.blunuxVersion;
+
+    if (!hasSonarEndpoint(version ?? "")) {
+      if (!this.sonarIncompatibilityWarned) {
+        this.sonarIncompatibilityWarned = true;
+        this.logger.warn(
+          `[sonar] incompatible Blunux version detected in DroneInfoTel: ${version}; sonar telemetry may not be available`,
+        );
+      }
+      return;
+    }
+
+    const devices = [
+      ...(msg.droneInfo?.gp?.gp1?.deviceList?.devices ?? []),
+      ...(msg.droneInfo?.gp?.gp2?.deviceList?.devices ?? []),
+      ...(msg.droneInfo?.gp?.gp3?.deviceList?.devices ?? []),
+    ].map((device) => device.deviceId);
+
+    if (devices.some((deviceId) => MULTIBEAM_DEVICE_IDS.includes(deviceId))) {
+      this.logger.info("[sonar] multibeam device detected in DroneInfoTel");
+      const transitions = this.tracker.sonarDetected();
+      this.sonarSub.connect(this.sonarUrl);
+      this.applyTransitions(transitions);
+    }
+  }
+
   connect() {
-    if (this.shouldBeConnected) {
+    if (this.tracker.intended) {
       this.logger.warn("[client] already connecting or connected");
       return;
     }
 
-    this.once("connected", async () => {
-      const msg = await this.waitForTelemetry("DroneInfoTel");
-      const version = msg.droneInfo?.blunuxVersion;
-
-      if (!hasSonarEndpoint(version ?? "")) {
-        this.logger.warn(
-          `[sonar] incompatible Blunux version detected in DroneInfoTel: ${version}; sonar telemetry may not be available`,
-        );
-        return;
-      }
-
-      const devices = [
-        ...(msg.droneInfo?.gp?.gp1?.deviceList?.devices ?? []),
-        ...(msg.droneInfo?.gp?.gp2?.deviceList?.devices ?? []),
-        ...(msg.droneInfo?.gp?.gp3?.deviceList?.devices ?? []),
-      ].map((device) => device.deviceId);
-
-      if (devices.some((deviceId) => MULTIBEAM_DEVICE_IDS.includes(deviceId))) {
-        this.logger.info("[sonar] multibeam device detected in DroneInfoTel");
-        this.isSonarDetected = true;
-        this.sonarSub.connect(this.sonarUrl);
-      }
-    });
+    this.sonarIncompatibilityWarned = false;
+    this.once("connected", this.primeSonarDetection);
 
     this.sub.setReconnectInterval(this.reconnectInterval);
     this.rpc.setReconnectInterval(this.reconnectInterval);
     this.pub.setReconnectInterval(this.reconnectInterval);
     this.sonarSub.setReconnectInterval(this.reconnectInterval);
 
-    this.shouldBeConnected = true;
-
-    for (const name of ["sub", "rpc", "pub"] as const) {
-      this.updateSocketState(name, "connecting");
-    }
-
-    this.logger.info(`[client] ${this.state}`);
-    this.emit(this.state);
+    this.applyTransitions(this.tracker.connectRequested());
 
     this.sub.subscribe("");
     this.sub.connect(this.subUrl);
@@ -281,12 +281,12 @@ export class BlueyeClient extends Emitter<Events> {
   }
 
   disconnect() {
-    if (!this.shouldBeConnected) {
+    if (!this.tracker.intended) {
       this.logger.warn("[client] already disconnected");
       return;
     }
 
-    this.shouldBeConnected = false;
+    this.off("connected", this.primeSonarDetection);
 
     this.sub.unsubscribe("");
     this.sub.disconnect(this.subUrl);
@@ -295,9 +295,7 @@ export class BlueyeClient extends Emitter<Events> {
     this.sonarSub.unsubscribe("");
     this.sonarSub.disconnect(this.sonarUrl);
 
-    for (const name of ["sub", "rpc", "pub", "sonar"] as const) {
-      this.updateSocketState(name, "disconnected");
-    }
+    this.applyTransitions(this.tracker.disconnectRequested());
   }
 
   /**
@@ -305,7 +303,7 @@ export class BlueyeClient extends Emitter<Events> {
    * cannot be reused afterwards — create a new instance to reconnect.
    */
   close() {
-    if (this.shouldBeConnected) {
+    if (this.tracker.intended) {
       this.disconnect();
     }
 

@@ -126,6 +126,7 @@ const defaultTelemetryPayloads: Record<string, () => any> = {
 
 type HarnessOpts = {
   failTelemetryRpc?: string[];
+  sonarEndpoint?: boolean;
 };
 
 const createHarness = (opts: HarnessOpts = {}) => {
@@ -203,6 +204,12 @@ const createHarness = (opts: HarnessOpts = {}) => {
     transport.listen(urls.subUrl);
     transport.listen(urls.rpcUrl).onMessage(rpcHandler);
     transport.listen(urls.pubUrl).onMessage(controlHandler);
+    if (opts.sonarEndpoint !== false) {
+      transport.listen(urls.sonarUrl);
+    }
+  };
+
+  const openSonar = () => {
     transport.listen(urls.sonarUrl);
   };
 
@@ -227,6 +234,7 @@ const createHarness = (opts: HarnessOpts = {}) => {
       transport.closeAll();
     },
     open,
+    openSonar,
   };
 };
 
@@ -373,18 +381,12 @@ describe("BlueyeClient", () => {
     client.connect();
     await waitForState(client, "connected");
 
-    // Publish DroneInfoTel repeatedly until the sonar detection handler picks it up
-    // (the handler's RPC must fail and fall back to SUB before it can receive this)
-    const sonarConnected = waitForEvent(client, "sonar-connected", 5_000);
-    const interval = setInterval(() => {
-      harness.publishTelemetry("DroneInfoTel", createDroneInfoTel(13));
-    }, 25);
+    // Detection listens for DroneInfoTel permanently — a single SUB publish
+    // is enough, no matter where the detection handler is in its RPC attempt
+    const sonarConnected = waitForEvent(client, "sonar-connected");
+    harness.publishTelemetry("DroneInfoTel", createDroneInfoTel(13));
 
-    try {
-      await sonarConnected;
-    } finally {
-      clearInterval(interval);
-    }
+    await sonarConnected;
     expect(client.state).toBe("connected");
 
     const [multibeam] = (await Promise.all([
@@ -413,6 +415,80 @@ describe("BlueyeClient", () => {
     // RPC still works without sonar
     const batteryRep = await client.sendRequest("GetBatteryReq");
     assertBattery(batteryRep!.battery);
+
+    client.disconnect();
+  });
+
+  it("emits edge-triggered state events — one per actual change", async () => {
+    const harness = createHarness();
+    const client = createClient(harness);
+
+    const events: string[] = [];
+    client.on("connecting", () => events.push("connecting"));
+    client.on("connected", () => events.push("connected"));
+    client.on("disconnected", () => events.push("disconnected"));
+
+    client.connect();
+    await waitForState(client, "connected");
+    expect(events).toEqual(["connecting", "connected"]);
+
+    client.disconnect();
+    expect(events).toEqual(["connecting", "connected", "disconnected"]);
+  });
+
+  it("requires sonar once detected: state and sends reflect the sonar socket", async () => {
+    // Sonar endpoint intentionally absent so the bring-up window stays open
+    const harness = createHarness({ sonarEndpoint: false });
+    const client = createClient(harness);
+
+    client.connect();
+    await waitForState(client, "connected");
+
+    const sonarConnecting = waitForEvent(client, "sonar-connecting");
+    harness.publishTelemetry("DroneInfoTel", createDroneInfoTel(13));
+    await sonarConnecting;
+
+    // Sonar detected but its socket is not ready — state regresses with an event
+    expect(client.state).toBe("connecting");
+
+    await expect(client.sendRequest("GetBatteryReq")).rejects.toThrow(
+      /cannot send rpc while connecting/,
+    );
+
+    // Once the sonar endpoint appears, the client completes the connection
+    harness.openSonar();
+    await waitForState(client, "connected");
+
+    const batteryRep = await client.sendRequest("GetBatteryReq");
+    assertBattery(batteryRep!.battery);
+
+    client.disconnect();
+  });
+
+  it("reconnects cleanly after a session in which sonar was detected", async () => {
+    const harness = createHarness();
+    const client = createClient(harness);
+
+    client.connect();
+    await waitForState(client, "connected");
+
+    const sonarConnected = waitForEvent(client, "sonar-connected");
+    harness.publishTelemetry("DroneInfoTel", createDroneInfoTel(13));
+    await sonarConnected;
+    expect(client.state).toBe("connected");
+
+    client.disconnect();
+    expect(client.state).toBe("disconnected");
+
+    // Sonar detection resets per connection: reconnect must reach "connected"
+    // without the sonar socket until a sonar is detected again
+    client.connect();
+    await waitForState(client, "connected");
+
+    const sonarReconnected = waitForEvent(client, "sonar-connected");
+    harness.publishTelemetry("DroneInfoTel", createDroneInfoTel(13));
+    await sonarReconnected;
+    expect(client.state).toBe("connected");
 
     client.disconnect();
   });
