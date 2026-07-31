@@ -1,8 +1,3 @@
-import {
-  Pub as ZMQPub,
-  Req as ZMQRep,
-  Sub as ZMQSub,
-} from "@blueyerobotics/jszmq";
 import { blueye } from "@blueyerobotics/protocol-definitions";
 import {
   type ConsolaInstance,
@@ -15,6 +10,11 @@ import { Emitter } from "strict-event-emitter";
 import type z from "zod";
 import { AsyncQueue } from "./async-queue";
 import { responseSchema, telemetrySchema } from "./schema";
+import {
+  JszmqTransport,
+  type Transport,
+  type TransportSocket,
+} from "./transport";
 
 const DEFAULT_SUB_URL = "ws://192.168.1.101:9985";
 const DEFAULT_RPC_URL = "ws://192.168.1.101:9986";
@@ -47,9 +47,6 @@ export type DecodedTelOutput<T extends Tel> = ReturnType<Protocol[T]["decode"]>;
 
 type State = "connecting" | "connected" | "disconnected";
 export type SocketName = "sub" | "rpc" | "pub" | "sonar";
-type ConnectionLifecycleSocket = {
-  on(event: "ready" | "lost", listener: () => void): unknown;
-};
 
 export type Events = {
   [K in State]: [];
@@ -74,6 +71,7 @@ type Options = Partial<{
   reconnectInterval: number;
   logLevel: LogLevel;
   autoConnect: boolean;
+  transport: Transport;
 }>;
 
 const hasSonarEndpoint = (version: string): boolean => {
@@ -92,10 +90,10 @@ export class BlueyeClient extends Emitter<Events> {
   private pubUrl: string;
   private sonarUrl: string;
 
-  private sub: ZMQSub;
-  private rpc: ZMQRep;
-  private pub: ZMQPub;
-  private sonarSub: ZMQSub;
+  private sub: TransportSocket;
+  private rpc: TransportSocket;
+  private pub: TransportSocket;
+  private sonarSub: TransportSocket;
   private queue: AsyncQueue;
   private logger: ConsolaInstance;
   private shouldBeConnected = false;
@@ -116,6 +114,7 @@ export class BlueyeClient extends Emitter<Events> {
     reconnectInterval = 2000,
     logLevel = LogLevels.info,
     autoConnect = false,
+    transport = new JszmqTransport(),
   }: Options = {}) {
     super();
 
@@ -127,10 +126,10 @@ export class BlueyeClient extends Emitter<Events> {
     this.pubUrl = pubUrl;
     this.sonarUrl = sonarUrl;
 
-    this.sub = new ZMQSub();
-    this.rpc = new ZMQRep();
-    this.pub = new ZMQPub();
-    this.sonarSub = new ZMQSub();
+    this.sub = transport.createSocket("sub");
+    this.rpc = transport.createSocket("req");
+    this.pub = transport.createSocket("pub");
+    this.sonarSub = transport.createSocket("sub");
 
     this.queue = new AsyncQueue();
     this.logger = createConsola({
@@ -210,10 +209,7 @@ export class BlueyeClient extends Emitter<Events> {
     this.emit(key as Tel, message as never);
   }
 
-  private bindSocketLifecycle(
-    name: SocketName,
-    socket: ConnectionLifecycleSocket,
-  ) {
+  private bindSocketLifecycle(name: SocketName, socket: TransportSocket) {
     socket.on("ready", () => {
       if (!this.shouldBeConnected) return;
       this.updateSocketState(name, "connected");
@@ -263,10 +259,10 @@ export class BlueyeClient extends Emitter<Events> {
       }
     });
 
-    this.sub.options.reconnectInterval = this.reconnectInterval;
-    this.rpc.options.reconnectInterval = this.reconnectInterval;
-    this.pub.options.reconnectInterval = this.reconnectInterval;
-    this.sonarSub.options.reconnectInterval = this.reconnectInterval;
+    this.sub.setReconnectInterval(this.reconnectInterval);
+    this.rpc.setReconnectInterval(this.reconnectInterval);
+    this.pub.setReconnectInterval(this.reconnectInterval);
+    this.sonarSub.setReconnectInterval(this.reconnectInterval);
 
     this.shouldBeConnected = true;
 
@@ -302,6 +298,21 @@ export class BlueyeClient extends Emitter<Events> {
     for (const name of ["sub", "rpc", "pub", "sonar"] as const) {
       this.updateSocketState(name, "disconnected");
     }
+  }
+
+  /**
+   * Permanently close all sockets and release their resources. The client
+   * cannot be reused afterwards — create a new instance to reconnect.
+   */
+  close() {
+    if (this.shouldBeConnected) {
+      this.disconnect();
+    }
+
+    this.sub.close();
+    this.rpc.close();
+    this.pub.close();
+    this.sonarSub.close();
   }
 
   async sendRequest<T extends Req>(

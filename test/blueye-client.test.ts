@@ -1,13 +1,12 @@
 // biome-ignore-all lint/suspicious/noExplicitAny: test harness uses dynamic protocol indexing
 // biome-ignore-all lint/style/noNonNullAssertion: harness always responds, so sendRequest cannot return null in these tests
 import { once } from "node:events";
-import net from "node:net";
 import { setTimeout as delay } from "node:timers/promises";
-import * as jsmq from "@blueyerobotics/jszmq";
 import { blueye } from "@blueyerobotics/protocol-definitions";
 import { describe, expect, it } from "vitest";
 
 import { BlueyeClient } from "../src/client";
+import { InMemoryTransport } from "../src/in-memory-transport";
 
 const BATTERY = {
   level: 85,
@@ -60,43 +59,6 @@ const waitForState = async (
     client.on("connecting", check);
     client.on("disconnected", check);
   });
-};
-
-const getFreePort = async (): Promise<number> => {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer();
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      if (address == null || typeof address === "string") {
-        server.close(() => reject(new Error("Unable to allocate port")));
-        return;
-      }
-
-      const { port } = address;
-      server.close((err) => {
-        if (err) {
-          reject(err);
-          return;
-        }
-
-        resolve(port);
-      });
-    });
-    server.on("error", reject);
-  });
-};
-
-const createUrls = async () => {
-  const subPort = await getFreePort();
-  const rpcPort = await getFreePort();
-  const pubPort = await getFreePort();
-
-  return {
-    subUrl: `ws://127.0.0.1:${subPort}`,
-    rpcUrl: `ws://127.0.0.1:${rpcPort}`,
-    pubUrl: `ws://127.0.0.1:${pubPort}`,
-    sonarUrl: `ws://127.0.0.1:${await getFreePort()}`,
-  };
 };
 
 const topicName = (topic: Uint8Array) =>
@@ -166,14 +128,14 @@ type HarnessOpts = {
   failTelemetryRpc?: string[];
 };
 
-const createHarness = async (
-  urls: Awaited<ReturnType<typeof createUrls>>,
-  opts: HarnessOpts = {},
-) => {
-  const telemetry = new jsmq.XPub();
-  const rpc = new jsmq.Rep();
-  const control = new jsmq.Sub();
-  const sonar = new jsmq.XPub();
+const createHarness = (opts: HarnessOpts = {}) => {
+  const transport = new InMemoryTransport();
+  const urls = {
+    subUrl: "mem://sub",
+    rpcUrl: "mem://rpc",
+    pubUrl: "mem://pub",
+    sonarUrl: "mem://sonar",
+  };
 
   const controls: { key: string; payload: any }[] = [];
   const rpcRequests: string[] = [];
@@ -181,34 +143,16 @@ const createHarness = async (
   // empty (payload-less) response, forcing the client to fall back to SUB.
   const failTelemetryRpc = new Set(opts.failTelemetryRpc ?? []);
 
-  let resolveTelemetrySubscription!: () => void;
-  const telemetrySubscription = new Promise<void>((resolve) => {
-    resolveTelemetrySubscription = resolve;
-  });
-  let resolveSonarSubscription!: () => void;
-  const sonarSubscription = new Promise<void>((resolve) => {
-    resolveSonarSubscription = resolve;
-  });
-
-  telemetry.bind(urls.subUrl);
-  rpc.bind(urls.rpcUrl);
-  control.bind(urls.pubUrl);
-  sonar.bind(urls.sonarUrl);
-  control.subscribe("");
-
-  telemetry.once("message", () => {
-    resolveTelemetrySubscription();
-  });
-  sonar.once("message", () => {
-    resolveSonarSubscription();
-  });
-
-  rpc.on("message", (topic: Uint8Array, payload: Uint8Array) => {
+  const rpcHandler = (
+    frames: Uint8Array[],
+    reply: (frames: (Uint8Array | string)[]) => void,
+  ) => {
+    const [topic, payload] = frames;
     const key = topicName(topic);
     rpcRequests.push(key);
 
     if (key === "GetBatteryReq") {
-      rpc.send([
+      reply([
         "blueye.protocol.GetBatteryRep",
         encodeMessage("GetBatteryRep", createBatteryRep()),
       ]);
@@ -220,7 +164,7 @@ const createHarness = async (
 
       if (failTelemetryRpc.has(request.messageType)) {
         // Respond with an empty rep (no payload) so Zod validation fails
-        rpc.send([
+        reply([
           "blueye.protocol.GetTelemetryRep",
           encodeMessage("GetTelemetryRep", {}),
         ]);
@@ -230,7 +174,7 @@ const createHarness = async (
       const factory = defaultTelemetryPayloads[request.messageType];
       const telPayload = factory ? factory() : {};
 
-      rpc.send([
+      reply([
         "blueye.protocol.GetTelemetryRep",
         encodeMessage(
           "GetTelemetryRep",
@@ -241,9 +185,10 @@ const createHarness = async (
     }
 
     throw new Error(`Unexpected RPC request: ${key}`);
-  });
+  };
 
-  control.on("message", (topic: Uint8Array, payload: Uint8Array) => {
+  const controlHandler = (frames: Uint8Array[]) => {
+    const [topic, payload] = frames;
     const key = topicName(topic);
     controls.push({
       key,
@@ -252,92 +197,89 @@ const createHarness = async (
           ? (blueye.protocol as any)[key].decode(payload)
           : payload,
     });
-  });
+  };
+
+  const open = () => {
+    transport.listen(urls.subUrl);
+    transport.listen(urls.rpcUrl).onMessage(rpcHandler);
+    transport.listen(urls.pubUrl).onMessage(controlHandler);
+    transport.listen(urls.sonarUrl);
+  };
+
+  open();
 
   return {
-    telemetry,
-    rpc,
-    control,
-    sonar,
+    transport,
+    urls,
     controls,
     rpcRequests,
-    async publishTelemetry(type: string, payload: any) {
-      await telemetrySubscription;
-      telemetry.send([`blueye.protocol.${type}`, encodeMessage(type, payload)]);
+    publishTelemetry(type: string, payload: any) {
+      transport
+        .endpoint(urls.subUrl)
+        ?.send([`blueye.protocol.${type}`, encodeMessage(type, payload)]);
     },
-    async publishSonarTelemetry(type: string, payload: any) {
-      await sonarSubscription;
-      sonar.send([`blueye.protocol.${type}`, encodeMessage(type, payload)]);
+    publishSonarTelemetry(type: string, payload: any) {
+      transport
+        .endpoint(urls.sonarUrl)
+        ?.send([`blueye.protocol.${type}`, encodeMessage(type, payload)]);
     },
-    async close() {
-      // ws@8's WebSocketServer.close() no longer terminates active client
-      // connections (ws@7 did). Force-close them so the BlueyeClient sees
-      // the disconnect and emits "lost".
-      for (const sock of [telemetry, rpc, control, sonar]) {
-        const wss = (sock as any).binds?.[0]?.server;
-        if (wss?.clients) {
-          for (const client of wss.clients as Set<{ terminate?: () => void }>) {
-            client.terminate?.();
-          }
-        }
-      }
-      telemetry.close();
-      rpc.close();
-      control.close();
-      sonar.close();
-      // Allow the OS to release the ports before the next test binds
-      await delay(50);
+    close() {
+      transport.closeAll();
     },
+    open,
   };
 };
 
+const createClient = (
+  harness: ReturnType<typeof createHarness>,
+  options: Record<string, unknown> = {},
+) =>
+  new BlueyeClient({
+    ...harness.urls,
+    transport: harness.transport,
+    timeout: 500,
+    ...options,
+  });
+
 describe("BlueyeClient", () => {
   it("connects and exchanges request, telemetry, and control messages", async () => {
-    const urls = await createUrls();
-    const harness = await createHarness(urls);
-    const client = new BlueyeClient({
-      ...urls,
-      reconnectInterval: 50,
-      timeout: 500,
-    });
+    const harness = createHarness();
+    const client = createClient(harness);
 
-    try {
-      client.connect();
-      await waitForState(client, "connected");
+    client.connect();
+    await waitForState(client, "connected");
 
-      expect(client.state).toBe("connected");
+    expect(client.state).toBe("connected");
 
-      const batteryRep = await client.sendRequest("GetBatteryReq");
-      assertBattery(batteryRep!.battery);
+    const batteryRep = await client.sendRequest("GetBatteryReq");
+    assertBattery(batteryRep!.battery);
 
-      const batteryTel = await client.getTelemetry("BatteryTel");
-      assertBattery(batteryTel.battery);
+    const batteryTel = await client.getTelemetry("BatteryTel");
+    assertBattery(batteryTel.battery);
 
-      const batteryTelemetryEvent = waitForEvent(client, "BatteryTel");
-      await harness.publishTelemetry("BatteryTel", createBatteryTel());
-      const [receivedTelemetry] = (await batteryTelemetryEvent) as any[];
-      assertBattery(receivedTelemetry.battery);
+    const batteryTelemetryEvent = waitForEvent(client, "BatteryTel");
+    harness.publishTelemetry("BatteryTel", createBatteryTel());
+    const [receivedTelemetry] = (await batteryTelemetryEvent) as any[];
+    assertBattery(receivedTelemetry.battery);
 
-      await client.sendControl("LightsCtrl", { lights: { value: 0.2 } });
-      await delay(50);
+    await client.sendControl("LightsCtrl", { lights: { value: 0.2 } });
+    await delay(10);
 
-      expect(harness.rpcRequests).toEqual([
-        "GetTelemetryReq",
-        "GetBatteryReq",
-        "GetTelemetryReq",
-      ]);
-      expect(harness.controls.at(-1)?.key).toBe("LightsCtrl");
-      expect(
-        Math.abs(harness.controls.at(-1)?.payload.lights?.value - 0.2),
-      ).toBeLessThan(1e-5);
-    } finally {
-      client.disconnect();
-      await harness.close();
-    }
+    expect(harness.rpcRequests).toEqual([
+      "GetTelemetryReq",
+      "GetBatteryReq",
+      "GetTelemetryReq",
+    ]);
+    expect(harness.controls.at(-1)?.key).toBe("LightsCtrl");
+    expect(
+      Math.abs(harness.controls.at(-1)?.payload.lights?.value - 0.2),
+    ).toBeLessThan(1e-5);
+
+    client.disconnect();
   });
 
   it("rejects outbound operations until connected", async () => {
-    const client = new BlueyeClient();
+    const client = new BlueyeClient({ transport: new InMemoryTransport() });
 
     await expect(client.sendRequest("GetBatteryReq")).rejects.toThrow(
       /cannot send rpc while disconnected/,
@@ -349,15 +291,14 @@ describe("BlueyeClient", () => {
   });
 
   it("stays connecting without a server and allows manual disconnect", async () => {
-    const urls = await createUrls();
+    // A transport with no listening endpoints — sockets never become ready
     const client = new BlueyeClient({
-      ...urls,
-      reconnectInterval: 50,
+      transport: new InMemoryTransport(),
       timeout: 100,
     });
 
     client.connect();
-    await delay(200);
+    await delay(50);
 
     expect(client.state).toBe("connecting");
 
@@ -374,245 +315,198 @@ describe("BlueyeClient", () => {
   });
 
   it("returns to connecting and reconnects after the server returns", async () => {
-    const urls = await createUrls();
-    let harness = await createHarness(urls);
-    const client = new BlueyeClient({
-      ...urls,
-      reconnectInterval: 50,
-      timeout: 500,
-    });
+    const harness = createHarness();
+    const client = createClient(harness);
 
-    try {
-      client.connect();
-      await waitForState(client, "connected");
-      await delay(50); // let sonar detection RPC complete
+    client.connect();
+    await waitForState(client, "connected");
+    await delay(50); // let sonar detection RPC complete
 
-      await harness.close();
-      await waitForState(client, "connecting", 3_000);
-      expect(client.state).toBe("connecting");
+    harness.close();
+    await waitForState(client, "connecting");
+    expect(client.state).toBe("connecting");
 
-      harness = await createHarness(urls);
-      await waitForState(client, "connected", 3_000);
+    harness.open();
+    await waitForState(client, "connected");
 
-      const batteryRep = await client.sendRequest("GetBatteryReq");
-      assertBattery(batteryRep!.battery);
-    } finally {
-      client.disconnect();
-      await harness.close();
-    }
+    const batteryRep = await client.sendRequest("GetBatteryReq");
+    assertBattery(batteryRep!.battery);
+
+    client.disconnect();
   });
 
-  it("stays connecting during repeated failures and stops after manual disconnect", async () => {
-    const urls = await createUrls();
-    let harness = await createHarness(urls);
-    const client = new BlueyeClient({
-      ...urls,
-      reconnectInterval: 50,
-      timeout: 100,
-    });
+  it("stays connecting during server loss and stops after manual disconnect", async () => {
+    const harness = createHarness();
+    const client = createClient(harness, { timeout: 100 });
 
-    try {
-      client.connect();
-      await waitForState(client, "connected");
-      await delay(50); // let sonar detection RPC complete
+    client.connect();
+    await waitForState(client, "connected");
+    await delay(50); // let sonar detection RPC complete
 
-      await harness.close();
-      await waitForState(client, "connecting", 3_000);
-      await delay(200);
+    harness.close();
+    await waitForState(client, "connecting");
 
-      expect(client.state).toBe("connecting");
+    expect(client.state).toBe("connecting");
 
-      await expect(client.sendRequest("GetBatteryReq")).rejects.toThrow(
-        /cannot send rpc while connecting/,
-      );
+    await expect(client.sendRequest("GetBatteryReq")).rejects.toThrow(
+      /cannot send rpc while connecting/,
+    );
 
-      await expect(
-        client.sendControl("LightsCtrl", { lights: { value: 1 } }),
-      ).rejects.toThrow(/cannot send pub while connecting/);
+    await expect(
+      client.sendControl("LightsCtrl", { lights: { value: 1 } }),
+    ).rejects.toThrow(/cannot send pub while connecting/);
 
-      client.disconnect();
-      expect(client.state).toBe("disconnected");
+    client.disconnect();
+    expect(client.state).toBe("disconnected");
 
-      harness = await createHarness(urls);
-      await delay(150);
-      expect(client.state).toBe("disconnected");
-    } finally {
-      client.disconnect();
-      await harness.close();
-    }
+    harness.open();
+    await delay(50);
+    expect(client.state).toBe("disconnected");
   });
 
   it("detects sonar from DroneInfoTel and emits sonar telemetry", async () => {
-    const urls = await createUrls();
-    const harness = await createHarness(urls, {
+    const harness = createHarness({
       failTelemetryRpc: ["DroneInfoTel"],
     });
-    const client = new BlueyeClient({
-      ...urls,
-      reconnectInterval: 50,
-      timeout: 500,
-    });
+    const client = createClient(harness);
+
+    client.connect();
+    await waitForState(client, "connected");
+
+    // Publish DroneInfoTel repeatedly until the sonar detection handler picks it up
+    // (the handler's RPC must fail and fall back to SUB before it can receive this)
+    const sonarConnected = waitForEvent(client, "sonar-connected", 5_000);
+    const interval = setInterval(() => {
+      harness.publishTelemetry("DroneInfoTel", createDroneInfoTel(13));
+    }, 25);
 
     try {
-      client.connect();
-      await waitForState(client, "connected");
-
-      // Publish DroneInfoTel repeatedly until the sonar detection handler picks it up
-      // (the handler's RPC must fail and fall back to SUB before it can receive this)
-      const sonarConnected = waitForEvent(client, "sonar-connected", 5_000);
-      const interval = setInterval(async () => {
-        await harness.publishTelemetry("DroneInfoTel", createDroneInfoTel(13));
-      }, 100);
-
-      try {
-        await sonarConnected;
-      } finally {
-        clearInterval(interval);
-      }
-      expect(client.state).toBe("connected");
-
-      const [multibeam] = (await Promise.all([
-        waitForEvent(client, "MultibeamPingTel"),
-        harness.publishSonarTelemetry(
-          "MultibeamPingTel",
-          createMultibeamPingTel(),
-        ),
-      ])) as any[];
-
-      expect(multibeam[0].ping?.deviceId).toBe(13);
+      await sonarConnected;
     } finally {
-      client.disconnect();
-      await harness.close();
+      clearInterval(interval);
     }
+    expect(client.state).toBe("connected");
+
+    const [multibeam] = (await Promise.all([
+      waitForEvent(client, "MultibeamPingTel"),
+      harness.publishSonarTelemetry(
+        "MultibeamPingTel",
+        createMultibeamPingTel(),
+      ),
+    ])) as any[];
+
+    expect(multibeam[0].ping?.deviceId).toBe(13);
+
+    client.disconnect();
   });
 
   it("does not require sonar for connected state when no multibeam detected", async () => {
-    const urls = await createUrls();
-    const harness = await createHarness(urls);
-    const client = new BlueyeClient({
-      ...urls,
-      reconnectInterval: 50,
-      timeout: 500,
-    });
+    const harness = createHarness();
+    const client = createClient(harness);
 
-    try {
-      client.connect();
-      await waitForState(client, "connected");
+    client.connect();
+    await waitForState(client, "connected");
 
-      // No DroneInfoTel published — global state is connected without sonar
-      expect(client.state).toBe("connected");
+    // No DroneInfoTel published — global state is connected without sonar
+    expect(client.state).toBe("connected");
 
-      // RPC still works without sonar
-      const batteryRep = await client.sendRequest("GetBatteryReq");
-      assertBattery(batteryRep!.battery);
-    } finally {
-      client.disconnect();
-      await harness.close();
-    }
+    // RPC still works without sonar
+    const batteryRep = await client.sendRequest("GetBatteryReq");
+    assertBattery(batteryRep!.battery);
+
+    client.disconnect();
+  });
+
+  it("close() disconnects and releases the sockets permanently", async () => {
+    const harness = createHarness();
+    const client = createClient(harness);
+
+    client.connect();
+    await waitForState(client, "connected");
+
+    client.close();
+    expect(client.state).toBe("disconnected");
+
+    await expect(client.sendRequest("GetBatteryReq")).rejects.toThrow(
+      /cannot send rpc while disconnected/,
+    );
+
+    // Closed sockets never re-attach, even with the server up
+    harness.open();
+    await delay(50);
+    expect(client.state).toBe("disconnected");
   });
 });
 
 describe("waitForTelemetry", () => {
   it("resolves via RPC when telemetry is available", async () => {
-    const urls = await createUrls();
-    const harness = await createHarness(urls);
-    const client = new BlueyeClient({
-      ...urls,
-      reconnectInterval: 50,
-      timeout: 500,
-    });
+    const harness = createHarness();
+    const client = createClient(harness);
 
-    try {
-      client.connect();
-      await waitForState(client, "connected");
+    client.connect();
+    await waitForState(client, "connected");
 
-      const result = await client.waitForTelemetry("BatteryTel");
-      assertBattery(result.battery);
-    } finally {
-      client.disconnect();
-      await harness.close();
-    }
+    const result = await client.waitForTelemetry("BatteryTel");
+    assertBattery(result.battery);
+
+    client.disconnect();
   });
 
   it("falls back to SUB when RPC fails", async () => {
-    const urls = await createUrls();
-    const harness = await createHarness(urls, {
+    const harness = createHarness({
       failTelemetryRpc: ["BatteryTel"],
     });
-    const client = new BlueyeClient({
-      ...urls,
-      reconnectInterval: 50,
-      timeout: 500,
-    });
+    const client = createClient(harness);
 
-    try {
-      client.connect();
-      await waitForState(client, "connected");
+    client.connect();
+    await waitForState(client, "connected");
 
-      // Start waiting — RPC will fail, so it blocks on SUB
-      const waiting = client.waitForTelemetry("BatteryTel", 2_000);
+    // Start waiting — RPC will fail, so it blocks on SUB
+    const waiting = client.waitForTelemetry("BatteryTel", 2_000);
 
-      // Publish telemetry over SUB after a short delay
-      await delay(50);
-      await harness.publishTelemetry("BatteryTel", createBatteryTel());
+    // Publish telemetry over SUB after a short delay
+    await delay(50);
+    harness.publishTelemetry("BatteryTel", createBatteryTel());
 
-      const result = await waiting;
-      assertBattery(result.battery);
-    } finally {
-      client.disconnect();
-      await harness.close();
-    }
+    const result = await waiting;
+    assertBattery(result.battery);
+
+    client.disconnect();
   });
 
   it("rejects on timeout", async () => {
-    const urls = await createUrls();
-    const harness = await createHarness(urls, {
+    const harness = createHarness({
       failTelemetryRpc: ["BatteryTel"],
     });
-    const client = new BlueyeClient({
-      ...urls,
-      reconnectInterval: 50,
-      timeout: 500,
-    });
+    const client = createClient(harness);
 
-    try {
-      client.connect();
-      await waitForState(client, "connected");
+    client.connect();
+    await waitForState(client, "connected");
 
-      await expect(client.waitForTelemetry("BatteryTel", 100)).rejects.toThrow(
-        /timed out waiting for BatteryTel telemetry/,
-      );
-    } finally {
-      client.disconnect();
-      await harness.close();
-    }
+    await expect(client.waitForTelemetry("BatteryTel", 100)).rejects.toThrow(
+      /timed out waiting for BatteryTel telemetry/,
+    );
+
+    client.disconnect();
   });
 
   it("removes listener on timeout", async () => {
-    const urls = await createUrls();
-    const harness = await createHarness(urls, {
+    const harness = createHarness({
       failTelemetryRpc: ["BatteryTel"],
     });
-    const client = new BlueyeClient({
-      ...urls,
-      reconnectInterval: 50,
-      timeout: 500,
-    });
+    const client = createClient(harness);
 
-    try {
-      client.connect();
-      await waitForState(client, "connected");
+    client.connect();
+    await waitForState(client, "connected");
 
-      const before = client.listenerCount("BatteryTel");
+    const before = client.listenerCount("BatteryTel");
 
-      await expect(client.waitForTelemetry("BatteryTel", 100)).rejects.toThrow(
-        /timed out/,
-      );
+    await expect(client.waitForTelemetry("BatteryTel", 100)).rejects.toThrow(
+      /timed out/,
+    );
 
-      expect(client.listenerCount("BatteryTel")).toBe(before);
-    } finally {
-      client.disconnect();
-      await harness.close();
-    }
+    expect(client.listenerCount("BatteryTel")).toBe(before);
+
+    client.disconnect();
   });
 });

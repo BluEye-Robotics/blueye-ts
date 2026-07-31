@@ -58,6 +58,33 @@ The derived `client.state` reflects the aggregate of the core sockets (`sub`, `r
 
 `client.sonarState` reflects the sonar socket independently. If the client loses one or more sockets after being connected, the derived state moves back to `connecting`. `sendRequest()` and `sendControl()` reject unless the client is in the `connected` state.
 
+## Transports
+
+`BlueyeClient` talks to its sockets through a small transport interface. The default adapter uses [jszmq](https://github.com/BluEye-Robotics/jszmq) over WebSockets; an in-memory adapter ships alongside it for tests, so application code using `BlueyeClient` can be exercised without a drone or any network:
+
+```ts
+import { BlueyeClient, InMemoryTransport } from "@blueyerobotics/blueye-ts";
+
+const transport = new InMemoryTransport();
+const rpc = transport.listen("mem://rpc");
+rpc.onMessage(([topic, payload], reply) => {
+  // inspect the request, reply([topic, encoded]) as the drone would
+});
+transport.listen("mem://sub");
+transport.listen("mem://pub");
+transport.listen("mem://sonar");
+
+const client = new BlueyeClient({
+  subUrl: "mem://sub",
+  rpcUrl: "mem://rpc",
+  pubUrl: "mem://pub",
+  sonarUrl: "mem://sonar",
+  transport,
+});
+```
+
+When you are done with a client, call `client.close()` to release the underlying sockets permanently; a closed client cannot be reused.
+
 ## Sonar support
 
 `BlueyeClient` connects the sonar websocket endpoint at `ws://192.168.1.101:9988` when a supported multibeam device is detected in a `DroneInfoTel` message.
