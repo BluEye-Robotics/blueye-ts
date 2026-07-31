@@ -8,6 +8,7 @@
   },
   "type": "module",
   "sideEffects": false,
+  "packageManager": "pnpm@11.18.0",
   "exports": {
     ".": "./dist/index.js",
     "./package.json": "./package.json"
@@ -29,18 +30,18 @@
   "dependencies": {
     "@blueyerobotics/jszmq": "^0.3.0",
     "@blueyerobotics/protocol-definitions": "3.2.0-d6c9260a",
-    "@bufbuild/protobuf": "^2.11.0",
+    "@bufbuild/protobuf": "^2.13.0",
     "consola": "^3.4.2",
-    "fflate": "^0.8.2",
-    "semver": "^7.7.4",
+    "fflate": "^0.8.3",
+    "semver": "^7.8.5",
     "strict-event-emitter": "^0.5.1"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.3.14",
-    "@types/node": "^25.4.0",
+    "@biomejs/biome": "2.5.6",
+    "@types/node": "^26.1.2",
     "@types/semver": "^7.7.1",
-    "tsx": "^4.20.7",
-    "typescript": "^5.9.3",
-    "vitest": "^4.0.5"
+    "tsx": "^4.23.1",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
   }
 }
