@@ -69,11 +69,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.BLUEYE_PROTOCOL_BUMP_PAT }}
         run: |
-          pnpm version patch --no-git-tag-version
-          NEW_VERSION=$(pnpm pkg get version | tr -d '"')
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -am "Bump protocol-definitions to ${PROTOCOL_VERSION} and version to ${NEW_VERSION}"
+          # pnpm version refuses to run in an unclean tree, so commit the
+          # dependency bump first and amend the version bump into it after
+          git commit -am "Bump protocol-definitions to ${PROTOCOL_VERSION}"
+          pnpm version patch --no-git-tag-version
+          NEW_VERSION=$(pnpm pkg get version | tr -d '"')
+          git commit --amend -am "Bump protocol-definitions to ${PROTOCOL_VERSION} and version to ${NEW_VERSION}"
           git tag "v${NEW_VERSION}"
           git push origin main "v${NEW_VERSION}"
           gh release create "v${NEW_VERSION}" --generate-notes
