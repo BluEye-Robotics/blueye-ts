@@ -35,3 +35,15 @@ jobs:
 
       - if: startsWith(github.ref, 'refs/tags/v')
         run: pnpm publish --no-git-checks --access public --tag latest
+
+      - name: Trigger blueye-ts bump in downstream repos
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.BLUEYE_PROTOCOL_BUMP_PAT }}
+        run: |
+          VERSION=$(pnpm pkg get version | tr -d '"')
+          for repo in BluEye-Robotics/p2-django BluEye-Robotics/dive-viewer; do
+            gh api "repos/${repo}/dispatches" \
+              -f event_type=blueye-ts-update \
+              -f "client_payload[version]=${VERSION}"
+          done
