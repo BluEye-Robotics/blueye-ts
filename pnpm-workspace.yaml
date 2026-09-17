@@ -1,4 +1,4 @@
 allowBuilds:
   esbuild: true
 minimumReleaseAgeExclude:
-  - '@blueyerobotics/protocol-definitions@3.2.0-0c4af895 || 3.2.0-3e35b5c5 || 3.2.0-423f0fbf || 3.2.0-dc69375e || 3.3.0-053a9cb8 || 3.3.0-1fa96b97 || 3.3.0-2d41d872 || 3.3.0-369b31cc || 3.3.0-5481f177 || 3.3.0-64187c7a || 3.3.0-788afaed || 3.3.0-8c916b96 || 3.3.0-991d560c || 3.3.0-c6f3225a || 3.3.0-d6aa630f || 3.3.0-e472bef2 || 3.3.0-fe575d02'
+  - '@blueyerobotics/protocol-definitions@3.2.0-0c4af895 || 3.2.0-3e35b5c5 || 3.2.0-423f0fbf || 3.2.0-dc69375e || 3.3.0-053a9cb8 || 3.3.0-1fa96b97 || 3.3.0-2b26d5f0 || 3.3.0-2d41d872 || 3.3.0-369b31cc || 3.3.0-5481f177 || 3.3.0-64187c7a || 3.3.0-788afaed || 3.3.0-8c916b96 || 3.3.0-991d560c || 3.3.0-c6f3225a || 3.3.0-d6aa630f || 3.3.0-e472bef2 || 3.3.0-fe575d02'
