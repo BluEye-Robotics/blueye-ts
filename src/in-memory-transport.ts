@@ -4,7 +4,7 @@ import type {
   TransportEvents,
   TransportFrame,
   TransportSocket,
-} from "./transport";
+} from "./transport.js";
 
 const utf8Encoder = new TextEncoder();
 

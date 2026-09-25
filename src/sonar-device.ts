@@ -1,5 +1,5 @@
 import * as semver from "semver";
-import type { DecodedTelOutput } from "./protocol";
+import type { DecodedTelOutput } from "./protocol.js";
 
 export const MULTIBEAM_DEVICE_IDS = [13, 16, 18, 20, 29, 30, 41, 42];
 

@@ -31,6 +31,8 @@ jobs:
       - run: pnpm install
       - run: pnpm check
       - run: pnpm build
+      - name: Import with plain Node
+        run: node --input-type=module -e "await import('@blueyerobotics/blueye-ts')"
       - run: pnpm test
 
       - if: startsWith(github.ref, 'refs/tags/v')

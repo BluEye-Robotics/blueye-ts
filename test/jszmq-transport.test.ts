@@ -11,7 +11,7 @@ import * as jsmq from "@blueyerobotics/jszmq";
 import { blueye } from "@blueyerobotics/protocol-definitions";
 import { describe, expect, it } from "vitest";
 
-import { BlueyeClient } from "../src/client";
+import { BlueyeClient } from "../src/client.js";
 
 const BATTERY = {
   level: 85,
