@@ -10,7 +10,7 @@ import {
   ConnectionTracker,
   type ConnectionTransition,
   type SocketName,
-} from "./connection-state";
+} from "./connection-state.js";
 import {
   type CreateArgs,
   type Ctrl,
@@ -26,16 +26,16 @@ import {
   type Req,
   type Tel,
   topicToKey,
-} from "./protocol";
-import { RequestPipeline } from "./request-pipeline";
-import { detectSonar } from "./sonar-device";
+} from "./protocol.js";
+import { RequestPipeline } from "./request-pipeline.js";
+import { detectSonar } from "./sonar-device.js";
 import {
   JszmqTransport,
   type Transport,
   type TransportSocket,
-} from "./transport";
+} from "./transport.js";
 
-export type { ConnectionState, SocketName } from "./connection-state";
+export type { ConnectionState, SocketName } from "./connection-state.js";
 
 const DEFAULT_SUB_URL = "ws://192.168.1.101:9985";
 const DEFAULT_RPC_URL = "ws://192.168.1.101:9986";

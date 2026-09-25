@@ -1,4 +1,4 @@
-import { BlueyeClient } from "./index";
+import { BlueyeClient } from "./index.js";
 
 const main = async () => {
   const client = new BlueyeClient();

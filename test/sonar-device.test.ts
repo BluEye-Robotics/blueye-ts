@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import type { DecodedTelOutput } from "../src/protocol";
+import type { DecodedTelOutput } from "../src/protocol.js";
 import {
   detectSonar,
   hasSonarEndpoint,
   MULTIBEAM_DEVICE_IDS,
-} from "../src/sonar-device";
+} from "../src/sonar-device.js";
 
 type GuestPortSlot = "gp1" | "gp2" | "gp3";
 

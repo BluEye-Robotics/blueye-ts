@@ -5,8 +5,8 @@ import { setTimeout as delay } from "node:timers/promises";
 import { blueye } from "@blueyerobotics/protocol-definitions";
 import { describe, expect, it } from "vitest";
 
-import { BlueyeClient } from "../src/client";
-import { InMemoryTransport } from "../src/in-memory-transport";
+import { BlueyeClient } from "../src/client.js";
+import { InMemoryTransport } from "../src/in-memory-transport.js";
 
 const BATTERY = {
   level: 85,

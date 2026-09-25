@@ -1,4 +1,4 @@
-import type { TransportFrame, TransportSocket } from "./transport";
+import type { TransportFrame, TransportSocket } from "./transport.js";
 
 export type ReplyFrames = [topic: Uint8Array, payload: Uint8Array];
 

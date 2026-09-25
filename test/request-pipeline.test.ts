@@ -4,8 +4,8 @@ import { describe, expect, it } from "vitest";
 import {
   type InMemoryReply,
   InMemoryTransport,
-} from "../src/in-memory-transport";
-import { RequestPipeline } from "../src/request-pipeline";
+} from "../src/in-memory-transport.js";
+import { RequestPipeline } from "../src/request-pipeline.js";
 
 const decodeUtf8 = (b: Uint8Array) => new TextDecoder().decode(b);
 

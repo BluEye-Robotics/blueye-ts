@@ -11,7 +11,7 @@ import {
   keyToTopic,
   protocolTypeOf,
   topicToKey,
-} from "../src/protocol";
+} from "../src/protocol.js";
 
 describe("protocol", () => {
   it("maps topics and typeUrls to protocol keys, from text or bytes", () => {

@@ -10,7 +10,7 @@ import {
   type ProtocolType,
   protocolTypeOf,
   topicToKey,
-} from "./protocol";
+} from "./protocol.js";
 
 export type Message = {
   [K in ProtocolKey]: {
