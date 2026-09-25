@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@blueyerobotics/jszmq':
-        specifier: ^0.3.0
-        version: 0.3.0
+        specifier: ^0.3.1
+        version: 0.3.1
       '@blueyerobotics/protocol-definitions':
         specifier: 3.3.0-2b26d5f0
         version: 3.3.0-2b26d5f0
@@ -108,8 +108,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@blueyerobotics/jszmq@0.3.0':
-    resolution: {integrity: sha512-wyWLFAR2pPFsc3hAR1A9hfJTvXE29DaFQ/NWTOURe9m6qQ0wOv92sRdMYWzr+GkfVNWbGeYzc1+w2rwOU4ueqg==}
+  '@blueyerobotics/jszmq@0.3.1':
+    resolution: {integrity: sha512-g+dsbaTrbsHz9vOCQ37pNCXN15rLVrS12eRvTavJBgBX9cPt3vn/6abp7eqJoTP0RzNduqq9IeBX9zO4gEeTnw==}
     engines: {node: '>=22'}
 
   '@blueyerobotics/protocol-definitions@3.3.0-2b26d5f0':
@@ -910,7 +910,7 @@ snapshots:
   '@biomejs/cli-win32-x64@2.5.6':
     optional: true
 
-  '@blueyerobotics/jszmq@0.3.0':
+  '@blueyerobotics/jszmq@0.3.1':
     dependencies:
       ws: 8.21.1
     transitivePeerDependencies:
