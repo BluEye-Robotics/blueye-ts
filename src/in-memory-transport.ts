@@ -1,3 +1,4 @@
+import { Emitter } from "strict-event-emitter";
 import type {
   SocketKind,
   Transport,
@@ -10,53 +11,6 @@ const utf8Encoder = new TextEncoder();
 
 const encodeFrame = (frame: TransportFrame): Uint8Array =>
   typeof frame === "string" ? utf8Encoder.encode(frame) : frame;
-
-type Listener = (...args: never[]) => void;
-type OnceWrapper = Listener & { original?: Listener };
-
-class MiniEmitter {
-  private listeners = new Map<string, Set<Listener>>();
-
-  on(event: string, listener: Listener) {
-    let set = this.listeners.get(event);
-    if (!set) {
-      set = new Set();
-      this.listeners.set(event, set);
-    }
-    set.add(listener);
-  }
-
-  once(event: string, listener: Listener) {
-    const wrapper: OnceWrapper = (...args: never[]) => {
-      this.off(event, wrapper);
-      listener(...args);
-    };
-    // Track the original so off(listener) also removes the wrapper
-    wrapper.original = listener;
-    this.on(event, wrapper);
-  }
-
-  off(event: string, listener: Listener) {
-    const set = this.listeners.get(event);
-    if (!set) return;
-    for (const registered of set) {
-      if (
-        registered === listener ||
-        (registered as { original?: Listener }).original === listener
-      ) {
-        set.delete(registered);
-      }
-    }
-  }
-
-  emit(event: string, ...args: unknown[]) {
-    const set = this.listeners.get(event);
-    if (!set) return;
-    for (const listener of [...set]) {
-      (listener as (...a: unknown[]) => void)(...args);
-    }
-  }
-}
 
 export type InMemoryReply = (frames: TransportFrame[]) => void;
 export type InMemoryMessageHandler = (
@@ -109,8 +63,10 @@ export class InMemoryEndpoint {
   }
 }
 
-class InMemorySocket implements TransportSocket {
-  private emitter = new MiniEmitter();
+class InMemorySocket
+  extends Emitter<TransportEvents>
+  implements TransportSocket
+{
   private wantedUrls = new Set<string>();
   private attachedUrls = new Set<string>();
   private subscriptions = new Set<string>();
@@ -119,7 +75,9 @@ class InMemorySocket implements TransportSocket {
   constructor(
     readonly kind: SocketKind,
     private hub: InMemoryTransport,
-  ) {}
+  ) {
+    super();
+  }
 
   connect(url: string) {
     if (this.closed) return;
@@ -175,27 +133,6 @@ class InMemorySocket implements TransportSocket {
     // endpoint starts listening again, so the interval is irrelevant.
   }
 
-  on<E extends keyof TransportEvents>(
-    event: E,
-    listener: (...args: TransportEvents[E]) => void,
-  ) {
-    this.emitter.on(event, listener as Listener);
-  }
-
-  once<E extends keyof TransportEvents>(
-    event: E,
-    listener: (...args: TransportEvents[E]) => void,
-  ) {
-    this.emitter.once(event, listener as Listener);
-  }
-
-  off<E extends keyof TransportEvents>(
-    event: E,
-    listener: (...args: TransportEvents[E]) => void,
-  ) {
-    this.emitter.off(event, listener as Listener);
-  }
-
   wants(url: string) {
     return !this.closed && this.wantedUrls.has(url);
   }
@@ -210,7 +147,7 @@ class InMemorySocket implements TransportSocket {
     this.attachedUrls.add(url);
     queueMicrotask(() => {
       if (this.attachedUrls.has(url)) {
-        this.emitter.emit("ready");
+        this.emit("ready");
       }
     });
   }
@@ -219,17 +156,18 @@ class InMemorySocket implements TransportSocket {
     if (!this.attachedUrls.delete(url)) return;
     queueMicrotask(() => {
       if (!this.closed) {
-        this.emitter.emit("lost");
+        this.emit("lost");
       }
     });
   }
 
   emitMessage(frames: Uint8Array[]) {
     if (this.closed) return;
-    const [topic, payload] = frames;
+    // Frames are never SharedArrayBuffer-backed in-memory
+    const [topic, payload] = frames as Uint8Array<ArrayBuffer>[];
     queueMicrotask(() => {
       if (!this.closed) {
-        this.emitter.emit("message", topic, payload);
+        this.emit("message", topic, payload);
       }
     });
   }
