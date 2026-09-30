@@ -96,7 +96,7 @@ export const parseMessages = (decompressed: Uint8Array, fixTimes = true) => {
     reader.pos = end;
 
     const msg = blueye.protocol.BinlogRecord.decode(
-      decompressed.subarray(start, end),
+      decompressed.slice(start, end),
       length,
     );
 
