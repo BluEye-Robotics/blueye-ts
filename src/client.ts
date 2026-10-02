@@ -145,6 +145,10 @@ export class BlueyeClient extends Emitter<Events> {
     }
   }
 
+  private get sockets() {
+    return [this.sub, this.rpc, this.pub, this.sonarSub];
+  }
+
   get state(): ConnectionState {
     return this.tracker.state;
   }
@@ -235,10 +239,7 @@ export class BlueyeClient extends Emitter<Events> {
 
     // Convert the silent failure into the explicit loss the state machine
     // already handles: sockets emit "lost" and their reconnect loop runs.
-    this.sub.dropConnection();
-    this.rpc.dropConnection();
-    this.pub.dropConnection();
-    this.sonarSub.dropConnection();
+    for (const socket of this.sockets) socket.dropConnection();
   }
 
   // Bound so disconnect() can remove it if the connection never came up
@@ -291,10 +292,8 @@ export class BlueyeClient extends Emitter<Events> {
     this.startStalenessWatchdog();
     this.once("connected", this.primeSonarDetection);
 
-    this.sub.setReconnectInterval(this.reconnectInterval);
-    this.rpc.setReconnectInterval(this.reconnectInterval);
-    this.pub.setReconnectInterval(this.reconnectInterval);
-    this.sonarSub.setReconnectInterval(this.reconnectInterval);
+    for (const socket of this.sockets)
+      socket.setReconnectInterval(this.reconnectInterval);
 
     this.applyTransitions(this.tracker.connectRequested());
 
@@ -334,10 +333,7 @@ export class BlueyeClient extends Emitter<Events> {
     }
 
     this.stopStalenessWatchdog();
-    this.sub.close();
-    this.rpc.close();
-    this.pub.close();
-    this.sonarSub.close();
+    for (const socket of this.sockets) socket.close();
   }
 
   async sendRequest<T extends Req>(

@@ -93,11 +93,10 @@ export const parseMessages = (decompressed: Uint8Array, fixTimes = true) => {
       break;
     }
 
-    const msgBytes = decompressed.buffer.slice(start, end);
     reader.pos = end;
 
     const msg = blueye.protocol.BinlogRecord.decode(
-      new Uint8Array(msgBytes),
+      decompressed.slice(start, end),
       length,
     );
 
@@ -180,8 +179,6 @@ export const parseFrames = (bytes: Uint8Array): Message[] => {
 };
 
 export const fixMessageTimes = (messages: Message[]) => {
-  if (messages.length === 0) return messages;
-
   const last = messages.at(-1);
   if (!last) return messages;
 
