@@ -43,14 +43,17 @@ jobs:
       - name: Wait for npm to serve the new version
         if: env.SKIP_BUMP != 'true'
         run: |
-          for i in $(seq 1 12); do
-            if npm view "@blueyerobotics/protocol-definitions@${PROTOCOL_VERSION}" version > /dev/null 2>&1; then
+          # npm serves the version's metadata before its tarball can be
+          # downloaded, so wait until the tarball itself is fetchable
+          for i in $(seq 1 30); do
+            TARBALL=$(npm view "@blueyerobotics/protocol-definitions@${PROTOCOL_VERSION}" dist.tarball 2>/dev/null) || true
+            if [ -n "$TARBALL" ] && curl -sfI "$TARBALL" > /dev/null; then
               exit 0
             fi
-            echo "Version ${PROTOCOL_VERSION} not on npm yet, retrying in 10s (${i}/12)"
+            echo "Version ${PROTOCOL_VERSION} not downloadable from npm yet, retrying in 10s (${i}/30)"
             sleep 10
           done
-          echo "Version ${PROTOCOL_VERSION} never appeared on npm"
+          echo "Version ${PROTOCOL_VERSION} never became downloadable"
           exit 1
 
       - if: env.SKIP_BUMP != 'true'
