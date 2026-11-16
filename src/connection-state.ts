@@ -31,6 +31,11 @@ export class ConnectionTracker {
     return this.intent;
   }
 
+  /** One socket's state. */
+  socketState(name: SocketName): ConnectionState {
+    return this.sockets[name];
+  }
+
   /** True once a sonar has been detected on the current connection. */
   get isSonarRequired(): boolean {
     return this.sonarRequired;

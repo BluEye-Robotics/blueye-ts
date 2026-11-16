@@ -707,3 +707,82 @@ describe("waitForTelemetry", () => {
     client.disconnect();
   });
 });
+
+describe("BlueyeClient SLAM stream and raw requests", () => {
+  it("opens the SLAM stream on its own and hands its subscribed messages over undecoded", async () => {
+    const harness = createHarness();
+    harness.transport.listen("mem://slam");
+    const client = createClient(harness, { slamUrl: "mem://slam" });
+    const received: [string, Uint8Array][] = [];
+    client.on("slam-message", (type, payload) => {
+      received.push([type, payload]);
+    });
+
+    // Without the drone's connection.
+    const connected = waitForEvent(client, "slam-connected");
+    client.subscribeSlam("blueye.protocol.SlamStatusTel");
+    client.connectSlam();
+    await connected;
+    expect(client.slamState).toBe("connected");
+    expect(client.state).toBe("disconnected");
+
+    const slam = harness.transport.endpoint("mem://slam");
+    slam?.send(["blueye.protocol.SlamMapTel", new Uint8Array([9])]);
+    slam?.send(["blueye.protocol.SlamStatusTel", new Uint8Array([8, 1])]);
+    await delay(20);
+    expect(received).toEqual([
+      ["blueye.protocol.SlamStatusTel", new Uint8Array([8, 1])],
+    ]);
+
+    // A topic subscribed later, while connected.
+    client.subscribeSlam("blueye.protocol.SlamMapTel");
+    slam?.send(["blueye.protocol.SlamMapTel", new Uint8Array([9])]);
+    await delay(20);
+    expect(received.at(-1)?.[0]).toBe("blueye.protocol.SlamMapTel");
+
+    client.disconnectSlam();
+    expect(client.slamState).toBe("disconnected");
+    client.close();
+  });
+
+  it("sends a raw request once the request socket is up, with its own timeout", async () => {
+    const harness = createHarness();
+    const transport = harness.transport;
+    // A replier of its own (a SLAM on a workstation): only requests, no drone.
+    transport.closeAll();
+    let answer = true;
+    transport.listen("mem://slam-rep").onMessage((frames, reply) => {
+      const type = new TextDecoder().decode(frames[0]);
+      if (!answer) return;
+      reply([type.replace(/Req$/, "Rep"), new Uint8Array([7])]);
+    });
+    const client = createClient(harness, { rpcUrl: "mem://slam-rep" });
+    await expect(
+      client.request("blueye.protocol.GetSlamMapReq", new Uint8Array()),
+    ).rejects.toThrow(/request socket/);
+
+    const rpcUp = waitForEvent(client, "rpc-connected");
+    client.connect();
+    await rpcUp;
+    expect(client.state).toBe("connecting");
+
+    const reply = await client.request(
+      "blueye.protocol.GetSlamMapReq",
+      new Uint8Array([1]),
+    );
+    expect(reply).toEqual({
+      type: "blueye.protocol.GetSlamMapRep",
+      payload: new Uint8Array([7]),
+    });
+
+    answer = false;
+    const started = Date.now();
+    await expect(
+      client.request("blueye.protocol.SetSlamActiveReq", new Uint8Array(), {
+        timeout: 100,
+      }),
+    ).rejects.toThrow(/timed out/);
+    expect(Date.now() - started).toBeLessThan(400);
+    client.close();
+  });
+});

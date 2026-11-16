@@ -8,6 +8,7 @@ import type {
 } from "./transport.js";
 
 const utf8Encoder = new TextEncoder();
+const utf8Decoder = new TextDecoder();
 
 const encodeFrame = (frame: TransportFrame): Uint8Array =>
   typeof frame === "string" ? utf8Encoder.encode(frame) : frame;
@@ -165,6 +166,12 @@ class InMemorySocket
     if (this.closed) return;
     // Frames are never SharedArrayBuffer-backed in-memory
     const [topic, payload] = frames as Uint8Array<ArrayBuffer>[];
+    // A SUB socket takes what starts with one of its subscriptions, as ZeroMQ
+    // does ("" takes everything).
+    if (this.kind === "sub") {
+      const name = utf8Decoder.decode(topic);
+      if (![...this.subscriptions].some((s) => name.startsWith(s))) return;
+    }
     queueMicrotask(() => {
       if (!this.closed) {
         this.emit("message", topic, payload);

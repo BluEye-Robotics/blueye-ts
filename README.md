@@ -38,7 +38,7 @@ client.connect();
 
 ## Connection states
 
-`BlueyeClient` manages four sockets: `sub`, `rpc`, `pub`, and `sonar`. Global state events (`connecting`, `connected`, `disconnected`) are emitted when the derived state changes. Per-socket events use the `${socket}-${state}` format (e.g. `sonar-connected`, `rpc-connecting`):
+`BlueyeClient` manages four sockets: `sub`, `rpc`, `pub`, and `sonar` (and the SLAM stream, see below). Global state events (`connecting`, `connected`, `disconnected`) are emitted when the derived state changes. Per-socket events use the `${socket}-${state}` format (e.g. `sonar-connected`, `rpc-connecting`):
 
 ```ts
 client.on("connected", () => {
@@ -102,3 +102,17 @@ When you are done with a client, call `client.close()` to release the underlying
 - On `connect()`, the sonar socket subscribes but only connects when a known multibeam device ID is found in the guest-port device list. Detection inspects every `DroneInfoTel` — one is requested over RPC when the connection comes up, and any later `DroneInfoTel` arriving over SUB is also considered.
 - Once detected, the sonar socket connects and the global `connected` state requires it to be ready. Detection resets on `disconnect()`; the next connection starts without requiring sonar until it is detected again.
 - Sonar telemetry such as `MultibeamPingTel`, `MultibeamConfigTel`, and `MultibeamDiscoveryTel` is emitted through the same typed event interface as other telemetry messages.
+
+## SLAM stream
+
+The SLAM (be-slam) publishes its map, poses, scans and status on its own port, `ws://192.168.1.101:9989` (`slamUrl`). The client opens it on demand, apart from the drone's connection, and hands its messages over undecoded, so a viewer can skip what it does not need (whole maps another viewer asked for):
+
+```ts
+client.on("slam-message", (type, payload) => {
+  // type: "blueye.protocol.SlamPoseTel", ...
+});
+client.subscribeSlam("blueye.protocol.SlamPoseTel");
+client.connectSlam();
+```
+
+Its state comes as `slam-connecting`, `slam-connected` and `slam-disconnected`, and does not count in `client.state`. SLAM requests go through the drone's replier like any other: `client.request(type, payload, { timeout })` sends one as the wire carries it and resolves with the reply's type and payload. It needs only the `rpc` socket (`client.rpcState`), so it also works against a SLAM on a workstation that answers its own requests. `sendRequest` takes a per-call `{ timeout }` too.
