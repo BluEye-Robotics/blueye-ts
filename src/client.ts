@@ -37,17 +37,35 @@ import {
 
 export type { ConnectionState, SocketName } from "./connection-state.js";
 
+const textDecoder = new TextDecoder();
+
 const DEFAULT_SUB_URL = "ws://192.168.1.101:9985";
 const DEFAULT_RPC_URL = "ws://192.168.1.101:9986";
 const DEFAULT_PUB_URL = "ws://192.168.1.101:9987";
 const DEFAULT_SONAR_URL = "ws://192.168.1.101:9988";
+const DEFAULT_SLAM_URL = "ws://192.168.1.101:9989";
 
 export type Events = {
   [K in ConnectionState]: [];
 } & {
   [K in `${SocketName}-${ConnectionState}`]: [];
 } & {
+  [K in `slam-${ConnectionState}`]: [];
+} & {
+  /**
+   * A message on the SLAM's stream, as it came: its type name (e.g.
+   * "blueye.protocol.SlamMapTel") and payload. Left undecoded: a consumer
+   * may skip most of it (whole maps another viewer asked for).
+   */
+  "slam-message": [type: string, payload: Uint8Array];
+} & {
   [K in Tel]: [DecodedTelOutput<K>];
+};
+
+/** Options for one request. */
+export type RequestOptions = {
+  /** How long to wait for the reply (ms); the client's `timeout` by default. */
+  timeout?: number;
 };
 
 type Options = Partial<{
@@ -55,6 +73,7 @@ type Options = Partial<{
   rpcUrl: string;
   pubUrl: string;
   sonarUrl: string;
+  slamUrl: string;
   timeout: number;
   reconnectInterval: number;
   stalenessTimeout: number;
@@ -72,11 +91,19 @@ export class BlueyeClient extends Emitter<Events> {
   private rpcUrl: string;
   private pubUrl: string;
   private sonarUrl: string;
+  private slamUrl: string;
 
   private sub: TransportSocket;
   private rpc: TransportSocket;
   private pub: TransportSocket;
   private sonarSub: TransportSocket;
+  /**
+   * The SLAM's stream (be-slam, port 9989): opened by connectSlam(), apart
+   * from the drone's connection, and subscribed to the topics a consumer
+   * asks for (subscribeSlam).
+   */
+  private slamSub: TransportSocket;
+  private slamStatus: ConnectionState = "disconnected";
   private pipeline: RequestPipeline;
   private logger: ConsolaInstance;
   private tracker = new ConnectionTracker();
@@ -89,6 +116,7 @@ export class BlueyeClient extends Emitter<Events> {
     rpcUrl = DEFAULT_RPC_URL,
     pubUrl = DEFAULT_PUB_URL,
     sonarUrl = DEFAULT_SONAR_URL,
+    slamUrl = DEFAULT_SLAM_URL,
     timeout = 2000,
     reconnectInterval = 2000,
     stalenessTimeout = 5000,
@@ -106,11 +134,13 @@ export class BlueyeClient extends Emitter<Events> {
     this.rpcUrl = rpcUrl;
     this.pubUrl = pubUrl;
     this.sonarUrl = sonarUrl;
+    this.slamUrl = slamUrl;
 
     this.sub = transport.createSocket("sub");
     this.rpc = transport.createSocket("req");
     this.pub = transport.createSocket("pub");
     this.sonarSub = transport.createSocket("sub");
+    this.slamSub = transport.createSocket("sub");
 
     this.pipeline = new RequestPipeline(this.rpc);
     this.logger = createConsola({
@@ -132,6 +162,14 @@ export class BlueyeClient extends Emitter<Events> {
       this.handleTelemetryMessage("sonar", topic, msg);
     });
 
+    this.slamSub.on("ready", () => this.setSlamStatus("connected"));
+    this.slamSub.on("lost", () => {
+      if (this.slamStatus !== "disconnected") this.setSlamStatus("connecting");
+    });
+    this.slamSub.on("message", (topic, msg) => {
+      this.emit("slam-message", textDecoder.decode(topic), msg);
+    });
+
     // Any DroneInfoTel — whether primed via RPC on connect or arriving over
     // SUB later — can reveal a multibeam sonar.
     this.on("DroneInfoTel", (msg) => {
@@ -151,6 +189,50 @@ export class BlueyeClient extends Emitter<Events> {
 
   get state(): ConnectionState {
     return this.tracker.state;
+  }
+
+  /** The request socket's state: requests go out once it is connected. */
+  get rpcState(): ConnectionState {
+    return this.tracker.socketState("rpc");
+  }
+
+  /** The SLAM stream's state. */
+  get slamState(): ConnectionState {
+    return this.slamStatus;
+  }
+
+  private setSlamStatus(state: ConnectionState) {
+    if (this.slamStatus === state) return;
+    this.slamStatus = state;
+    this.logger.info(`[slam] ${state}`);
+    this.emit(`slam-${state}`);
+  }
+
+  /**
+   * Opens the SLAM's stream (be-slam on the drone, port 9989), apart from
+   * the drone's connection: what it publishes comes as "slam-message" for
+   * the topics subscribed with subscribeSlam().
+   */
+  connectSlam() {
+    if (this.slamStatus !== "disconnected") return;
+    this.slamSub.setReconnectInterval(this.reconnectInterval);
+    this.setSlamStatus("connecting");
+    this.slamSub.connect(this.slamUrl);
+  }
+
+  disconnectSlam() {
+    if (this.slamStatus === "disconnected") return;
+    this.slamSub.disconnect(this.slamUrl);
+    this.setSlamStatus("disconnected");
+  }
+
+  /** Takes the SLAM stream's messages whose type name starts with `topic`. */
+  subscribeSlam(topic: string) {
+    this.slamSub.subscribe(topic);
+  }
+
+  unsubscribeSlam(topic: string) {
+    this.slamSub.unsubscribe(topic);
   }
 
   private applyTransitions(transitions: ConnectionTransition[]) {
@@ -333,12 +415,15 @@ export class BlueyeClient extends Emitter<Events> {
     }
 
     this.stopStalenessWatchdog();
+    this.disconnectSlam();
     for (const socket of this.sockets) socket.close();
+    this.slamSub.close();
   }
 
   async sendRequest<T extends Req>(
     req: T,
     opts: CreateArgs<T> = {},
+    { timeout = this.timeout }: RequestOptions = {},
   ): Promise<DecodedOutput<T> | null> {
     this.ensureConnected("rpc");
 
@@ -350,7 +435,7 @@ export class BlueyeClient extends Emitter<Events> {
 
     const [topic, data] = await this.pipeline.request(
       [keyToTopic(req), encoded],
-      this.timeout,
+      timeout,
     );
     const key = topicToKey(topic);
 
@@ -367,6 +452,28 @@ export class BlueyeClient extends Emitter<Events> {
     this.logger.debug("[rpc] decoded:", result);
 
     return result;
+  }
+
+  /**
+   * A request as the wire carries it: its type name and payload, and the
+   * reply's, undecoded, for a consumer that does its own decoding (the SLAM
+   * viewer). It needs only the request socket connected, not the drone's
+   * whole connection. Requests share one queue, one at a time: a slow one
+   * (the SLAM switching its sensor, a few seconds) holds the others back
+   * for as long, within its timeout.
+   */
+  async request(
+    type: string,
+    payload: Uint8Array,
+    { timeout = this.timeout }: RequestOptions = {},
+  ): Promise<{ type: string; payload: Uint8Array }> {
+    if (this.rpcState !== "connected") {
+      throw new Error(
+        `[rpc] cannot send ${type} while the request socket is ${this.rpcState}`,
+      );
+    }
+    const [topic, data] = await this.pipeline.request([type, payload], timeout);
+    return { type: textDecoder.decode(topic), payload: data };
   }
 
   async getTelemetry<T extends Tel>(type: T): Promise<DecodedTelOutput<T>> {
