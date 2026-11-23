@@ -134,6 +134,10 @@ class InMemorySocket
     // endpoint starts listening again, so the interval is irrelevant.
   }
 
+  setOpenAttemptInterval(_ms: number) {
+    // In-memory sockets attach without a handshake that could stall.
+  }
+
   wants(url: string) {
     return !this.closed && this.wantedUrls.has(url);
   }

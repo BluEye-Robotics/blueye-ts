@@ -68,6 +68,14 @@ The watchdog only arms after the first telemetry message of a connection (a conn
 const client = new BlueyeClient({ stalenessTimeout: 0 }); // no watchdog
 ```
 
+### Stalled opening handshakes
+
+Safari on macOS and iOS 26 can leave a WebSocket to a LAN address in `CONNECTING` without sending a TCP SYN, until another WebSocket to the same address starts opening. With `openAttemptInterval` set, each socket starts a second, overlapping attempt to the same address when its handshake has stalled that long, and uses whichever opens first. If neither has opened after another interval, both are abandoned and the reconnect loop retries after `reconnectInterval`. The default `0` makes a single attempt with no deadline. See jszmq's `SocketOptions.openAttemptInterval` for details.
+
+```ts
+const client = new BlueyeClient({ openAttemptInterval: 10_000 });
+```
+
 ## Transports
 
 `BlueyeClient` talks to its sockets through a small transport interface. The default adapter uses [jszmq](https://github.com/BluEye-Robotics/jszmq) over WebSockets; an in-memory adapter ships alongside it for tests, so application code using `BlueyeClient` can be exercised without a drone or any network:

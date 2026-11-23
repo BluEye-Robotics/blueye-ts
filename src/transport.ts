@@ -28,6 +28,11 @@ export type TransportSocket = {
   subscribe(topic: string): void;
   unsubscribe(topic: string): void;
   setReconnectInterval(ms: number): void;
+  /**
+   * Milliseconds an opening handshake may stall before a second, overlapping
+   * attempt starts to the same address; 0 makes a single attempt.
+   */
+  setOpenAttemptInterval(ms: number): void;
   on<E extends keyof TransportEvents>(
     event: E,
     listener: (...args: TransportEvents[E]) => void,
@@ -101,6 +106,10 @@ class JszmqSocket implements TransportSocket {
 
   setReconnectInterval(ms: number) {
     this.socket.options.reconnectInterval = ms;
+  }
+
+  setOpenAttemptInterval(ms: number) {
+    this.socket.options.openAttemptInterval = ms;
   }
 
   on<E extends keyof TransportEvents>(

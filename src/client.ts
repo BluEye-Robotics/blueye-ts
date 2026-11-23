@@ -76,6 +76,12 @@ type Options = Partial<{
   slamUrl: string;
   timeout: number;
   reconnectInterval: number;
+  /**
+   * Milliseconds a socket's opening handshake may stall before a second,
+   * overlapping attempt starts to the same address; 0 (the default) makes a
+   * single attempt. Recovers Safari LAN handshakes that never send a SYN.
+   */
+  openAttemptInterval: number;
   stalenessTimeout: number;
   logLevel: LogLevel;
   autoConnect: boolean;
@@ -85,6 +91,7 @@ type Options = Partial<{
 export class BlueyeClient extends Emitter<Events> {
   public timeout: number;
   public reconnectInterval: number;
+  public openAttemptInterval: number;
   public stalenessTimeout: number;
 
   private subUrl: string;
@@ -119,6 +126,7 @@ export class BlueyeClient extends Emitter<Events> {
     slamUrl = DEFAULT_SLAM_URL,
     timeout = 2000,
     reconnectInterval = 2000,
+    openAttemptInterval = 0,
     stalenessTimeout = 5000,
     logLevel = LogLevels.info,
     autoConnect = false,
@@ -128,6 +136,7 @@ export class BlueyeClient extends Emitter<Events> {
 
     this.timeout = timeout;
     this.reconnectInterval = reconnectInterval;
+    this.openAttemptInterval = openAttemptInterval;
     this.stalenessTimeout = stalenessTimeout;
 
     this.subUrl = subUrl;
@@ -216,6 +225,7 @@ export class BlueyeClient extends Emitter<Events> {
   connectSlam() {
     if (this.slamStatus !== "disconnected") return;
     this.slamSub.setReconnectInterval(this.reconnectInterval);
+    this.slamSub.setOpenAttemptInterval(this.openAttemptInterval);
     this.setSlamStatus("connecting");
     this.slamSub.connect(this.slamUrl);
   }
@@ -374,8 +384,10 @@ export class BlueyeClient extends Emitter<Events> {
     this.startStalenessWatchdog();
     this.once("connected", this.primeSonarDetection);
 
-    for (const socket of this.sockets)
+    for (const socket of this.sockets) {
       socket.setReconnectInterval(this.reconnectInterval);
+      socket.setOpenAttemptInterval(this.openAttemptInterval);
+    }
 
     this.applyTransitions(this.tracker.connectRequested());
 
